@@ -1,0 +1,41 @@
+name: release
+
+# Push a tag like v0.2.0 (scripts\release.ps1 does it) and this builds sticky.exe, works out its
+# SHA-256 and publishes a GitHub release. Running copies of Sticky pick it up within 12 hours.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Version in Cargo.toml must match the tag
+        shell: pwsh
+        run: |
+          $v = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
+          if ("v$v" -ne "${{ github.ref_name }}") { throw "Cargo.toml says $v but the tag is ${{ github.ref_name }}" }
+
+      - run: cargo test --release
+      - run: cargo build --release
+
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory dist | Out-Null
+          Copy-Item target/release/sticky.exe dist/
+          $h = (Get-FileHash dist/sticky.exe -Algorithm SHA256).Hash.ToLower()
+          Set-Content dist/sticky.exe.sha256 "$h  sticky.exe" -NoNewline
+          Copy-Item install.ps1 dist/
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
