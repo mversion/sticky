@@ -139,7 +139,9 @@ fn stop_others() {
     use windows_sys::Win32::System::Threading::*;
     let me = std::process::id();
     let Ok(exe) = std::env::current_exe() else { return };
-    let dir = exe.parent().map(Path::to_path_buf).unwrap_or_default();
+    // compare resolved paths: one side may be in short (8.3) form
+    let real = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    let dir = real(exe.parent().unwrap_or(Path::new(".")));
     unsafe {
         let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
         if snap == INVALID_HANDLE_VALUE {
@@ -157,7 +159,7 @@ fn stop_others() {
                     let mut len = buf.len() as u32;
                     if QueryFullProcessImageNameW(h, PROCESS_NAME_WIN32, buf.as_mut_ptr(), &mut len) != 0 {
                         let p = PathBuf::from(String::from_utf16_lossy(&buf[..len as usize]));
-                        if p.parent() == Some(dir.as_path()) {
+                        if p.parent().map(real).as_deref() == Some(dir.as_path()) {
                             TerminateProcess(h, 0);
                         }
                     }
