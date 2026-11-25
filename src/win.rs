@@ -159,6 +159,61 @@ pub fn primary_area() -> Area {
     unsafe { area_of(MonitorFromPoint(POINT { x: 0, y: 0 }, MONITOR_DEFAULTTOPRIMARY)) }
 }
 
+/// A connected screen: `id` is its device name (`\\.\DISPLAY2`), which is what settings store.
+pub struct Screen {
+    pub id: String,
+    pub primary: bool,
+    pub width: i32,
+    pub height: i32,
+    hmon: HMONITOR,
+}
+
+impl Screen {
+    /// "Display 2 · 2560×1440 (main)".
+    pub fn label(&self) -> String {
+        let n = self.id.trim_start_matches(r"\\.\").replace("DISPLAY", "Display ");
+        format!("{n} · {}×{}{}", self.width, self.height, if self.primary { " (main)" } else { "" })
+    }
+}
+
+pub fn screens() -> Vec<Screen> {
+    unsafe extern "system" fn each(mon: HMONITOR, _: HDC, _: *mut RECT, data: LPARAM) -> windows_sys::core::BOOL {
+        unsafe {
+            let out = &mut *(data as *mut Vec<Screen>);
+            let mut mi: MONITORINFOEXW = std::mem::zeroed();
+            mi.monitorInfo.cbSize = std::mem::size_of::<MONITORINFOEXW>() as u32;
+            if GetMonitorInfoW(mon, &mut mi as *mut MONITORINFOEXW as *mut MONITORINFO) != 0 {
+                let len = mi.szDevice.iter().position(|&c| c == 0).unwrap_or(mi.szDevice.len());
+                let r = mi.monitorInfo.rcMonitor;
+                out.push(Screen {
+                    id: String::from_utf16_lossy(&mi.szDevice[..len]),
+                    primary: mi.monitorInfo.dwFlags & MONITORINFOF_PRIMARY != 0,
+                    width: r.right - r.left,
+                    height: r.bottom - r.top,
+                    hmon: mon,
+                });
+            }
+            1
+        }
+    }
+    let mut v: Vec<Screen> = Vec::new();
+    unsafe {
+        EnumDisplayMonitors(std::ptr::null_mut(), std::ptr::null(), Some(each), &mut v as *mut Vec<Screen> as LPARAM);
+    }
+    v.sort_by(|a, b| a.id.cmp(&b.id));
+    v
+}
+
+/// Work area for a screen setting: "primary" (main display), "cursor" (where the mouse is) or a
+/// device name. A screen that's no longer connected falls back to the main display.
+pub fn screen_area(choice: &str) -> Area {
+    match choice {
+        "cursor" => cursor_area(),
+        "primary" | "" => primary_area(),
+        id => screens().into_iter().find(|s| s.id == id).map(|s| area_of(s.hmon)).unwrap_or_else(primary_area),
+    }
+}
+
 
 pub fn move_window(hwnd: HWND, x: i32, y: i32) {
     unsafe {
@@ -173,10 +228,45 @@ pub fn window_pos(hwnd: HWND) -> Option<(i32, i32)> {
     }
 }
 
-pub fn play_reminder_sound() {
+/// Reminder sounds: (setting key, label, file in C:\Windows\Media). "windows" is whatever the
+/// Windows sound scheme has for Calendar Reminder.
+pub const SOUNDS: [(&str, &str, &str); 6] = [
+    ("alarm", "Alarm", "Alarm01.wav"),
+    ("alarm2", "Alarm 2", "Alarm02.wav"),
+    ("ring", "Ring", "Ring01.wav"),
+    ("chimes", "Chimes", "chimes.wav"),
+    ("notify", "Notify", "Windows Notify System Generic.wav"),
+    ("windows", "Windows reminder", ""),
+];
+
+fn sound_file(name: &str) -> Option<std::path::PathBuf> {
+    let media = std::path::PathBuf::from(std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into())).join("Media");
+    if name == "windows" {
+        let v = reg_get_str(r"AppEvents\Schemes\Apps\.Default\Notification.Reminder\.Current", "")?;
+        let v = expand_env(&v);
+        return (!v.trim().is_empty()).then(|| std::path::PathBuf::from(v));
+    }
+    let file = SOUNDS.iter().find(|s| s.0 == name).map(|s| s.2).unwrap_or("Alarm01.wav");
+    Some(media.join(file))
+}
+
+fn expand_env(s: &str) -> String {
+    let mut out = s.to_string();
+    for (k, v) in std::env::vars() {
+        out = out.replace(&format!("%{k}%"), &v).replace(&format!("%{}%", k.to_uppercase()), &v);
+    }
+    out
+}
+
+/// Plays a reminder sound (see [`SOUNDS`]) without waiting for it. Falls back to the Windows
+/// asterisk sound if the file is missing.
+pub fn play_sound(name: &str) {
     use windows_sys::Win32::Media::Audio::*;
     unsafe {
-        let ok = PlaySoundW(wide("Notification.Reminder").as_ptr(), std::ptr::null_mut(), SND_ALIAS | SND_ASYNC | SND_NODEFAULT);
+        let ok = match sound_file(name).filter(|p| p.exists()) {
+            Some(p) => PlaySoundW(wide(&p.to_string_lossy()).as_ptr(), std::ptr::null_mut(), SND_FILENAME | SND_ASYNC | SND_NODEFAULT),
+            None => 0,
+        };
         if ok == 0 {
             PlaySoundW(wide("SystemAsterisk").as_ptr(), std::ptr::null_mut(), SND_ALIAS | SND_ASYNC);
         }

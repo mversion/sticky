@@ -26,7 +26,7 @@ upgrades and uninstalling.
 
 | How | What happens |
 |---|---|
-| **Ctrl+Alt+N** (Settings > Quick-add hotkey) | Quick-add box on the screen the mouse is on |
+| **Ctrl+Alt+N** (Settings > Quick-add hotkey) | Quick-add box on the main display (Settings > Open Sticky on: main display, a particular screen, or where the mouse is) |
 | Start menu: Sticky | The main window |
 | Tray icon | Left-click opens Sticky; right-click: quick add, sticky note, settings, log, updates, quit |
 | Kite launcher: `p` Tab *text* Enter | Adds it straight away (`sticky kite` sets this up) |
@@ -50,7 +50,7 @@ An optional always-on-top sticky note shows open items and what got done today.
 - category: `#upnext`, `#later`, `#today`, `#someday` (prefixes work: `#up`); other `#words` become tags
 - `note: …` makes a note (no tick box)
 
-Reminder pop-ups stay on top with Done, Snooze and more snooze choices. Reminders missed while the
+Reminder pop-ups stay on top with Done, Snooze and more snooze choices, and play a sound you pick in Settings > Reminders (Alarm by default, with a Test button and an option to repeat it every minute until you respond). Reminders missed while the
 PC was off pop up when it's back.
 
 ## How it's built

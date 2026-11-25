@@ -159,7 +159,25 @@ fn control(ui: &mut egui::Ui, pal: &Pal, key: &str, s: &mut Settings) {
         "smart_category" => toggle(ui, pal, &mut s.smart_category),
         "confirm_delete" => toggle(ui, pal, &mut s.confirm_delete),
         "remind_when_timed" => toggle(ui, pal, &mut s.remind_when_timed),
-        "sound" => toggle(ui, pal, &mut s.sound),
+        "sound" => {
+            toggle(ui, pal, &mut s.sound);
+            if ui.button(format!("{}  Test", ic::BELL)).clicked() {
+                crate::win::play_sound(&s.sound_name);
+            }
+            let sounds = crate::win::SOUNDS;
+            egui::ComboBox::from_id_salt("sound_name")
+                .selected_text(sounds.iter().find(|x| x.0 == s.sound_name).map(|x| x.1).unwrap_or("Alarm"))
+                .width(150.0)
+                .show_ui(ui, |ui| {
+                    for (k, l, _) in sounds {
+                        if ui.selectable_value(&mut s.sound_name, k.to_string(), l).clicked() {
+                            crate::win::play_sound(k);
+                        }
+                    }
+                });
+        }
+        "sound_repeat" => toggle(ui, pal, &mut s.sound_repeat),
+        "window_screen" => screen_picker(ui, "window_screen", &mut s.window_screen),
         "note_window" => toggle(ui, pal, &mut s.note_window),
         "note_on_top" => toggle(ui, pal, &mut s.note_on_top),
         "note_show_done" => toggle(ui, pal, &mut s.note_show_done),
@@ -227,11 +245,7 @@ fn control(ui: &mut egui::Ui, pal: &Pal, key: &str, s: &mut Settings) {
                 ui.selectable_value(&mut s.popup_corner, k.to_string(), l);
             }
         }
-        "popup_monitor" => {
-            for (k, l) in [("cursor", "Where the mouse is"), ("primary", "Main screen")] {
-                ui.selectable_value(&mut s.popup_monitor, k.to_string(), l);
-            }
-        }
+        "popup_monitor" => screen_picker(ui, "popup_monitor", &mut s.popup_monitor),
         "note_color" => {
             for (k, c) in super::note::COLORS.iter().rev() {
                 let (r, resp) = ui.allocate_exact_size(egui::vec2(22.0, 22.0), egui::Sense::click());
@@ -252,6 +266,26 @@ fn control(ui: &mut egui::Ui, pal: &Pal, key: &str, s: &mut Settings) {
         }
         _ => {}
     }
+}
+
+/// Main display, where the mouse is, or one particular connected screen.
+fn screen_picker(ui: &mut egui::Ui, id: &str, value: &mut String) {
+    let screens = crate::win::screens();
+    let label = match value.as_str() {
+        "primary" | "" => "Main display".to_string(),
+        "cursor" => "Where the mouse is".to_string(),
+        v => screens.iter().find(|x| x.id == v).map(|x| x.label()).unwrap_or_else(|| "Main display (that screen isn't connected)".into()),
+    };
+    egui::ComboBox::from_id_salt(id).selected_text(label).width(230.0).show_ui(ui, |ui| {
+        ui.selectable_value(value, "primary".to_string(), "Main display");
+        ui.selectable_value(value, "cursor".to_string(), "Where the mouse is");
+        if screens.len() > 1 {
+            ui.separator();
+            for sc in &screens {
+                ui.selectable_value(value, sc.id.clone(), sc.label());
+            }
+        }
+    });
 }
 
 fn categories(ui: &mut egui::Ui, pal: &Pal, s: &mut Settings, new_cat: &mut String) {

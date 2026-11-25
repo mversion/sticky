@@ -94,7 +94,7 @@ pub fn run(mode: &str) {
             let hwnd = win::hwnd_from(cc);
             if let Some(h) = hwnd {
                 win::style_window(h, None);
-                place(h, m, size);
+                place(h, m, size, &settings.window_screen);
             }
             let watch = watch(cc.egui_ctx.clone(), true);
             let view = match mode.as_str() {
@@ -128,9 +128,9 @@ pub fn run(mode: &str) {
     );
 }
 
-/// Centre on the screen the mouse is on; quick add sits in the top third like a launcher.
-fn place(h: HWND, m: Mode, size: Vec2) {
-    let a = win::cursor_area();
+/// Centre on the chosen screen (Settings > Open Sticky on); quick add sits in the top third like a launcher.
+fn place(h: HWND, m: Mode, size: Vec2, screen: &str) {
+    let a = win::screen_area(screen);
     let w = (size.x * a.scale) as i32;
     let hh = (size.y * a.scale) as i32;
     let x = a.left + ((a.right - a.left) - w) / 2;
@@ -161,7 +161,7 @@ impl MainApp {
             };
             self.last_height = 0.0;
             self.ctx.send_viewport_cmd(ViewportCommand::InnerSize(size));
-            place(h, mode, size);
+            place(h, mode, size, &self.settings.window_screen);
         }
     }
 

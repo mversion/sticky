@@ -32,7 +32,7 @@ pub fn run(title: String, detail: String) {
             apply_style(&cc.egui_ctx, &pal, &settings);
             if let Some(h) = win::hwnd_from(cc) {
                 win::style_window(h, None);
-                let a = win::cursor_area();
+                let a = win::screen_area(&settings.window_screen);
                 let w = (420.0 * a.scale) as i32;
                 win::move_window(h, a.left + (a.right - a.left - w) / 2, a.top + ((a.bottom - a.top) as f32 * 0.24) as i32);
             }

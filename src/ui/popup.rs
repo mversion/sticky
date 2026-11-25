@@ -19,6 +19,8 @@ struct Popup {
     last_h: f32,
     slot: i32,
     repeats: bool,
+    rang: u32,
+    last_ring: std::time::Instant,
 }
 
 const W: f32 = 400.0;
@@ -35,9 +37,6 @@ pub fn run(id: u64, slot: i32, was: i64) {
         .with_resizable(false)
         .with_always_on_top()
         .with_taskbar(true);
-    if settings.sound {
-        win::play_reminder_sound();
-    }
     let _ = eframe::run_native(
         "Sticky reminder",
         native_options(vb),
@@ -50,13 +49,13 @@ pub fn run(id: u64, slot: i32, was: i64) {
                 win::style_window(h, Some(u32::from_le_bytes([pal.accent.r(), pal.accent.g(), pal.accent.b(), 0])));
                 place(h, &settings, slot, 150.0);
             }
-            Ok(Box::new(Popup { id, text: item.text.clone(), was, settings, pal, hwnd, frames: 0, snooze_open: false, last_h: 150.0, slot, repeats: item.repeat.is_some() }))
+            Ok(Box::new(Popup { id, text: item.text.clone(), was, settings, pal, hwnd, frames: 0, snooze_open: false, last_h: 150.0, slot, repeats: item.repeat.is_some(), rang: 0, last_ring: std::time::Instant::now() }))
         }),
     );
 }
 
 fn place(h: windows_sys::Win32::Foundation::HWND, s: &Settings, slot: i32, height: f32) {
-    let a = if s.popup_monitor == "cursor" { win::cursor_area() } else { win::primary_area() };
+    let a = win::screen_area(&s.popup_monitor);
     let w = (W * a.scale) as i32;
     let hh = (height * a.scale) as i32;
     let gap = (14.0 * a.scale) as i32;
@@ -86,6 +85,18 @@ impl eframe::App for Popup {
             && let Some(h) = self.hwnd
         {
             win::set_topmost(h, true);
+        }
+        // Sound once the pop-up is on screen, then every minute if asked (up to 10 times).
+        if self.settings.sound {
+            let due = if self.rang == 0 { self.frames >= 2 } else { self.settings.sound_repeat && self.rang < 10 && self.last_ring.elapsed().as_secs() >= 60 };
+            if due {
+                win::play_sound(&self.settings.sound_name);
+                self.rang += 1;
+                self.last_ring = std::time::Instant::now();
+            }
+            if self.rang == 0 || (self.settings.sound_repeat && self.rang < 10) {
+                ctx.request_repaint_after(std::time::Duration::from_millis(if self.rang == 0 { 50 } else { 1000 }));
+            }
         }
         let pal = self.pal;
         let mut close = false;
