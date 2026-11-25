@@ -76,6 +76,11 @@ impl eframe::App for Popup {
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        // Drag to move. Added first so the buttons drawn later get the clicks.
+        let bg = ui.interact(ctx.content_rect(), egui::Id::unique("drag"), egui::Sense::drag());
+        if bg.drag_started() {
+            ctx.send_viewport_cmd(ViewportCommand::StartDrag);
+        }
         self.frames += 1;
         if self.frames == 2
             && let Some(h) = self.hwnd
@@ -152,10 +157,6 @@ impl eframe::App for Popup {
             if let Some(hw) = self.hwnd {
                 place(hw, &self.settings, self.slot, h);
             }
-        }
-        let bg = ui.interact(ctx.content_rect(), egui::Id::unique("drag"), egui::Sense::drag());
-        if bg.drag_started() {
-            ctx.send_viewport_cmd(ViewportCommand::StartDrag);
         }
         if close {
             ctx.send_viewport_cmd(ViewportCommand::Close);

@@ -141,8 +141,13 @@ impl eframe::App for Note {
 
         let mut toggle = None;
         egui::CentralPanel::default().frame(egui::Frame::new().fill(paper).inner_margin(Margin { left: 14, right: 10, top: 10, bottom: 10 })).show(ui, |ui| {
-            // header (drag handle)
-            let head = ui.horizontal(|ui| {
+            // header: drag handle first, so the buttons drawn on it get the clicks
+            let top = ui.available_rect_before_wrap();
+            let handle = egui::Rect::from_min_size(top.min, egui::vec2(top.width(), 24.0));
+            if ui.interact(handle, egui::Id::unique("notedrag"), egui::Sense::drag()).drag_started() {
+                ctx.send_viewport_cmd(ViewportCommand::StartDrag);
+            }
+            ui.horizontal(|ui| {
                 ui.label(RichText::new("Sticky").font(semi(15.0)).color(ink));
                 ui.label(RichText::new(format!("{tasks_open} open · {} done today", done_ids.len())).size(12.0).color(dim));
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -157,10 +162,6 @@ impl eframe::App for Note {
                     }
                 });
             });
-            let r = ui.interact(head.response.rect, egui::Id::unique("notedrag"), egui::Sense::drag()); // drag only, so the buttons keep their clicks
-            if r.drag_started() {
-                ctx.send_viewport_cmd(ViewportCommand::StartDrag);
-            }
             ui.add_space(4.0);
             // quick add line
             let te = ui.add(

@@ -946,6 +946,12 @@ impl eframe::App for MainApp {
 
         match self.mode {
             Mode::Capture => {
+                // Drag anywhere on the background. Added before the content: egui gives the
+                // pointer to whatever was added last, so buttons and rows go on top of it.
+                let bg = ui.interact(ctx.content_rect(), egui::Id::unique("bgdrag"), egui::Sense::drag());
+                if bg.drag_started() {
+                    ctx.send_viewport_cmd(ViewportCommand::StartDrag);
+                }
                 let r = egui::CentralPanel::default().frame(egui::Frame::new().fill(self.pal.bg)).show(ui, |ui| {
                     self.capture_ui(ui)
                 });
@@ -953,11 +959,6 @@ impl eframe::App for MainApp {
                 if (h - self.last_height).abs() > 1.0 {
                     self.last_height = h;
                     ctx.send_viewport_cmd(ViewportCommand::InnerSize(Vec2::new(CAPTURE_W, h)));
-                }
-                // drag anywhere on the background
-                let bg = ui.interact(ctx.content_rect(), egui::Id::unique("bgdrag"), egui::Sense::drag());
-                if bg.drag_started() {
-                    ctx.send_viewport_cmd(ViewportCommand::StartDrag);
                 }
             }
             Mode::Full => {
