@@ -289,12 +289,10 @@ pub enum RowAct {
     Pin,
 }
 
-/// A round checkbox. Returns true when clicked.
-pub fn check_circle(ui: &mut egui::Ui, done: bool, ring: Color32, pal: &Pal) -> bool {
-    let (rect, resp) = ui.allocate_exact_size(Vec2::splat(20.0), Sense::click());
+/// Paint a round checkbox in `rect`. The row handles the click (see `item_row`).
+fn paint_check(ui: &egui::Ui, rect: egui::Rect, done: bool, hovered: bool, ring: Color32, pal: &Pal) {
     let p = ui.painter();
     let c = rect.center();
-    let hovered = resp.hovered();
     if done {
         p.circle_filled(c, 9.0, pal.accent);
         p.text(c, egui::Align2::CENTER_CENTER, ic::CHECK, icon_font(11.0), pal.on_accent);
@@ -304,7 +302,6 @@ pub fn check_circle(ui: &mut egui::Ui, done: bool, ring: Color32, pal: &Pal) -> 
             p.text(c, egui::Align2::CENTER_CENTER, ic::CHECK, icon_font(10.0), ring.gamma_multiply(0.8));
         }
     }
-    resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
 }
 
 pub struct RowOpts {
@@ -316,6 +313,7 @@ pub struct RowOpts {
 /// One item: checkbox, text, and a line of chips. Hover shows pin and delete.
 pub fn item_row(ui: &mut egui::Ui, it: &Item, pal: &Pal, s: &Settings, o: &RowOpts) -> RowAct {
     let mut act = RowAct::None;
+    let mut check: Option<egui::Rect> = None;
     let bg = ui.painter().add(egui::Shape::Noop);
     let pad = if o.compact { 4 } else { 7 };
     let now = chrono::Local::now();
@@ -323,11 +321,11 @@ pub fn item_row(ui: &mut egui::Ui, it: &Item, pal: &Pal, s: &Settings, o: &RowOp
         ui.set_width(ui.available_width());
         ui.horizontal_top(|ui| {
             ui.spacing_mut().item_spacing.x = 10.0;
+            let (rect, _) = ui.allocate_exact_size(Vec2::splat(20.0), Sense::hover());
             if it.kind == Kind::Note {
-                let (rect, _) = ui.allocate_exact_size(Vec2::splat(20.0), Sense::hover());
                 ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, ic::NOTE, icon_font(14.0), pal.dim);
-            } else if check_circle(ui, it.done, priority_ring(it.priority, pal), pal) {
-                act = RowAct::Toggle;
+            } else {
+                check = Some(rect); // painted below, once we know whether it's hovered
             }
             ui.vertical(|ui| {
                 ui.spacing_mut().item_spacing.y = 3.0;
@@ -397,6 +395,16 @@ pub fn item_row(ui: &mut egui::Ui, it: &Item, pal: &Pal, s: &Settings, o: &RowOp
     let rect = inner.response.rect;
     let resp = ui.interact(rect, ui.scope_id().with(("row", it.id)), Sense::click());
     let hovered = ui.rect_contains_pointer(rect);
+    // The row takes the click; the left strip (circle plus a margin, full row height) ticks the
+    // item and the rest opens it. One widget, so nothing on top can swallow the circle's clicks.
+    let tick_zone = check.map(|c| egui::Rect::from_min_max(egui::pos2(rect.left(), rect.top()), egui::pos2(c.right() + 6.0, rect.bottom())));
+    let on_tick = tick_zone.is_some_and(|z| ui.rect_contains_pointer(z));
+    if let Some(c) = check {
+        paint_check(ui, c, it.done, on_tick, priority_ring(it.priority, pal), pal);
+    }
+    if on_tick {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
     let fill = if o.selected {
         pal.accent.gamma_multiply(0.13)
     } else if hovered {
@@ -430,7 +438,8 @@ pub fn item_row(ui: &mut egui::Ui, it: &Item, pal: &Pal, s: &Settings, o: &RowOp
         }
     }
     if act == RowAct::None && resp.clicked() {
-        act = RowAct::Open;
+        let at = resp.interact_pointer_pos();
+        act = if tick_zone.zip(at).is_some_and(|(z, p)| z.contains(p)) { RowAct::Toggle } else { RowAct::Open };
     }
     act
 }
