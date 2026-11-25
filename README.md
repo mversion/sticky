@@ -35,7 +35,7 @@ upgrades and uninstalling.
 Quick add: Enter adds, Esc closes, Ctrl+O opens the full window, Ctrl+, opens settings. It closes
 when you click away.
 
-The main window has All open (grouped by category), each category, Reminders, Notes, Done, an
+The main window has All open (grouped by folder), each folder (+ next to Folders adds one; right-click a folder to rename, move or delete it), Reminders, Notes, Done, an
 Activity log and a searchable Settings page. Click an item to edit it; hover for pin and delete.
 An optional always-on-top sticky note shows open items and what got done today.
 
@@ -47,11 +47,11 @@ An optional always-on-top sticky note shows open items and what got done today.
 - dates: `today`, `tomorrow`, `friday`, `next week`, `25/12` (day first), `3 jan`, `dec 1st`
 - repeats: `every day`, `daily`, `every weekday`, `every weekend`, `every monday`, `every mon, wed and fri`, `weekly`, `fortnightly`, `monthly`, `yearly`, `every other day`, `every 3 days`, `every 2 weeks`, `every 30 minutes`, `every 2h`, `hourly`, and for those `between 9am and 5pm` / `from 9 to 5`. The item editor has the same as Microsoft To Do (daily, weekdays, weekly, monthly, yearly, custom) plus every N minutes or hours
 - priority: `!` `!!` `!!!`, `!high`, `p1`, `urgent`, `asap`
-- category: `#upnext`, `#later`, `#today`, `#someday` (prefixes work: `#up`); other `#words` become tags
+- folder: `#upnext`, `#later`, `#today`, `#someday` (prefixes work: `#up`); other `#words` become tags
 - `note: …` makes a note (no tick box); anything added on the Notes page is a note
 - web addresses (`https://…`, `www.…`) stay as typed and show as clickable link chips
 
-Click an item to edit it: notes, steps (ticking the last step ticks the item off; a repeating one moves to its next time with its steps cleared), when, pop-up, repeat, category, priority, type. Steps can be ticked on the reminder pop-up too.
+Click an item to edit it: notes, steps (ticking the last step ticks the item off; a repeating one moves to its next time with its steps cleared), when, pop-up, repeat, folder, priority, type. Steps can be ticked on the reminder pop-up too.
 
 Reminder pop-ups stay on top with Done, Snooze and more snooze choices, and play a sound you pick in Settings > Reminders (Alarm by default, with a Test button, a loudness boost up to x8, music turned down while it plays, and an option to repeat it every minute until you respond). Reminders missed while the
 PC was off pop up when it's back.

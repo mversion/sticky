@@ -62,6 +62,9 @@ pub struct MainApp {
     pub(super) new_cat: String,
     pub(super) ha: super::settings_view::HaUi,
     frames: u32,
+    /// Sidebar: the name being typed for a new folder, and a folder being renamed (old, new).
+    new_folder: Option<String>,
+    renaming: Option<(String, String)>,
     ctx: egui::Context,
 }
 
@@ -127,6 +130,8 @@ pub fn run(mode: &str) {
                 new_cat: String::new(),
                 ha: Default::default(),
                 frames: 0,
+                new_folder: None,
+                renaming: None,
                 ctx: cc.egui_ctx.clone(),
             };
             // for screenshots: open an item's editor straight away
@@ -252,6 +257,85 @@ impl MainApp {
             }
             RowAct::None => {}
         }
+        self.reload();
+    }
+
+    /// Add, rename, move or delete a folder from the sidebar. Folders are `settings.categories`;
+    /// an item's folder is its `category` (the desk dashboard reads that name).
+    fn folder_action(&mut self, a: FolderAct) {
+        let mut s = Settings::load();
+        let taken = |s: &Settings, n: &str| s.categories.iter().any(|c| c.eq_ignore_ascii_case(n));
+        match a {
+            FolderAct::Add(name) => {
+                self.new_folder = None;
+                if !name.is_empty() && !taken(&s, &name) {
+                    s.categories.push(name.clone());
+                    s.save();
+                    store::log("folder added", 0, &name);
+                    self.view = View::Category(name);
+                }
+            }
+            FolderAct::CancelNew => self.new_folder = None,
+            FolderAct::StartRename(old) => {
+                self.new_folder = None;
+                self.renaming = Some((old.clone(), old));
+            }
+            FolderAct::CancelRename => self.renaming = None,
+            FolderAct::Rename(old, new) => {
+                self.renaming = None;
+                if new.is_empty() || new == old || (taken(&s, &new) && !new.eq_ignore_ascii_case(&old)) {
+                    return;
+                }
+                for c in s.categories.iter_mut() {
+                    if *c == old {
+                        *c = new.clone();
+                    }
+                }
+                if s.default_category == old {
+                    s.default_category = new.clone();
+                }
+                s.save();
+                store::update(|d| {
+                    for i in d.items.iter_mut().filter(|i| i.category == old) {
+                        i.category = new.clone();
+                    }
+                });
+                store::log("folder renamed", 0, &format!("{old} to {new}"));
+                if self.view == View::Category(old) {
+                    self.view = View::Category(new);
+                }
+            }
+            FolderAct::Move(from, to) => {
+                if from < s.categories.len() && to < s.categories.len() {
+                    s.categories.swap(from, to);
+                    s.save();
+                }
+            }
+            FolderAct::Delete(name) => {
+                if s.categories.len() < 2 {
+                    return;
+                }
+                s.categories.retain(|c| *c != name);
+                if s.default_category == name {
+                    s.default_category = s.categories[0].clone();
+                }
+                let to = s.default_category.clone();
+                s.save();
+                let moved = store::update(|d| {
+                    let mut n = 0;
+                    for i in d.items.iter_mut().filter(|i| i.category == name) {
+                        i.category = to.clone();
+                        n += 1;
+                    }
+                    n
+                });
+                store::log("folder deleted", 0, &format!("{name} ({moved} item(s) moved to {to})"));
+                if self.view == View::Category(name) {
+                    self.view = View::Open;
+                }
+            }
+        }
+        self.settings = Settings::load();
         self.reload();
     }
 
@@ -531,7 +615,7 @@ impl MainApp {
                     ui.label(RichText::new("Repeat").color(pal.dim));
                     ui.vertical(|ui| repeat_editor(ui, &pal, &mut e.repeat));
                     ui.end_row();
-                    ui.label(RichText::new("Category").color(pal.dim));
+                    ui.label(RichText::new("Folder").color(pal.dim));
                     ui.horizontal_wrapped(|ui| {
                         for c in &cats {
                             if ui.selectable_label(&e.category == c, c).clicked() {
@@ -646,7 +730,7 @@ impl MainApp {
                 k(ui, " Esc ", "close");
                 k(ui, " Ctrl+O ", "open Sticky");
                 k(ui, " ! !! !!! ", "priority");
-                k(ui, " #later ", "category");
+                k(ui, " #later ", "folder");
             });
             if let Some((m, t)) = &self.flash
                 && t.elapsed().as_secs_f32() < 2.0
@@ -722,28 +806,96 @@ impl MainApp {
             let mut entries: Vec<(String, &str, View, usize)> = vec![("All open".into(), ic::INBOX, View::Open, open_tasks(&|i| i.kind == Kind::Task))];
             for c in &self.settings.categories {
                 let cc = c.clone();
-                entries.push((c.clone(), ic::LIST, View::Category(c.clone()), open_tasks(&move |i: &Item| i.kind == Kind::Task && i.category == cc)));
+                entries.push((c.clone(), ic::FOLDER, View::Category(c.clone()), open_tasks(&move |i: &Item| i.kind == Kind::Task && i.category == cc)));
             }
             let other = open_tasks(&|i| i.kind == Kind::Task && !self.settings.categories.contains(&i.category));
             if other > 0 {
-                entries.push(("Other".into(), ic::LIST, View::Category(String::new()), other));
+                entries.push(("Other".into(), ic::FOLDER, View::Category(String::new()), other));
             }
             entries.push(("Reminders".into(), ic::BELL, View::Reminders, open_tasks(&|i| i.remind)));
             entries.push(("Notes".into(), ic::NOTE, View::Notes, open_tasks(&|i| i.kind == Kind::Note)));
             let done = self.data.items.iter().filter(|i| self.visible_done(i)).count();
             entries.push(("Done".into(), ic::DONE_ALL, View::Done, done));
             let mut clicked = None;
+            let mut folder_act: Option<FolderAct> = None;
+            let folders = self.settings.categories.clone();
             for (idx, (label, g, v, n)) in entries.into_iter().enumerate() {
                 if idx == 1 {
                     ui.add_space(4.0);
-                    ui.label(RichText::new("CATEGORIES").size(10.5).color(pal.faint));
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("FOLDERS").size(10.5).color(pal.faint));
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            let b = ui.add(egui::Button::new(icon(ic::ADD, 11.0, pal.dim)).frame(false)).on_hover_text("New folder");
+                            if b.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                                self.new_folder = Some(String::new());
+                                self.renaming = None;
+                            }
+                        });
+                    });
                 }
                 if label == "Reminders" {
+                    if let Some(name) = self.new_folder.as_mut() {
+                        ui.horizontal(|ui| {
+                            ui.add_space(6.0);
+                            ui.label(icon(ic::FOLDER, 13.0, pal.accent));
+                            let r = ui.add(egui::TextEdit::singleline(name).hint_text("Folder name").desired_width(f32::INFINITY));
+                            if !r.has_focus() && !r.lost_focus() {
+                                r.request_focus();
+                            }
+                            if r.lost_focus() {
+                                folder_act = Some(if ui.input(|i| i.key_pressed(Key::Enter)) { FolderAct::Add(name.trim().to_string()) } else { FolderAct::CancelNew });
+                            }
+                        });
+                        ui.label(RichText::new("Enter to add, Esc to cancel").size(11.0).color(pal.faint));
+                    }
                     ui.add_space(8.0);
                 }
-                if nav(ui, &pal, g, &label, Some(n), self.view == v) {
-                    clicked = Some(v);
+                let is_folder = matches!(&v, View::Category(c) if !c.is_empty());
+                if is_folder && self.renaming.as_ref().is_some_and(|(old, _)| *old == label) {
+                    let (_, new) = self.renaming.as_mut().unwrap();
+                    ui.horizontal(|ui| {
+                        ui.add_space(6.0);
+                        ui.label(icon(ic::FOLDER, 13.0, pal.accent));
+                        let r = ui.add(egui::TextEdit::singleline(new).desired_width(f32::INFINITY));
+                        if !r.has_focus() && !r.lost_focus() {
+                            r.request_focus();
+                        }
+                        if r.lost_focus() {
+                            folder_act = Some(if ui.input(|i| i.key_pressed(Key::Escape)) { FolderAct::CancelRename } else { FolderAct::Rename(label.clone(), new.trim().to_string()) });
+                        }
+                    });
+                    continue;
                 }
+                let r = nav_resp(ui, &pal, g, &label, Some(n), self.view == v);
+                if r.clicked() {
+                    clicked = Some(v.clone());
+                }
+                if is_folder {
+                    let pos = folders.iter().position(|f| *f == label).unwrap_or(0);
+                    r.context_menu(|ui| {
+                        if ui.button("Rename").clicked() {
+                            folder_act = Some(FolderAct::StartRename(label.clone()));
+                            ui.close();
+                        }
+                        if ui.add_enabled(pos > 0, egui::Button::new("Move up")).clicked() {
+                            folder_act = Some(FolderAct::Move(pos, pos - 1));
+                            ui.close();
+                        }
+                        if ui.add_enabled(pos + 1 < folders.len(), egui::Button::new("Move down")).clicked() {
+                            folder_act = Some(FolderAct::Move(pos, pos + 1));
+                            ui.close();
+                        }
+                        ui.separator();
+                        let tip = if n > 0 { format!("Its {n} open item(s) move to {}", self.settings.default_category) } else { "It's empty".to_string() };
+                        if ui.add_enabled(folders.len() > 1, egui::Button::new(RichText::new("Delete folder").color(pal.red))).on_hover_text(tip).clicked() {
+                            folder_act = Some(FolderAct::Delete(label.clone()));
+                            ui.close();
+                        }
+                    });
+                }
+            }
+            if let Some(a) = folder_act {
+                self.folder_action(a);
             }
             ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
                 if nav(ui, &pal, ic::SETTINGS, "Settings", None, self.view == View::Settings) {
@@ -931,6 +1083,10 @@ fn fix_slash_time(s: &str) -> String {
 }
 
 fn nav(ui: &mut egui::Ui, pal: &Pal, g: &str, label: &str, count: Option<usize>, sel: bool) -> bool {
+    nav_resp(ui, pal, g, label, count, sel).clicked()
+}
+
+fn nav_resp(ui: &mut egui::Ui, pal: &Pal, g: &str, label: &str, count: Option<usize>, sel: bool) -> egui::Response {
     let (r, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 32.0), egui::Sense::click());
     let fill = if sel { pal.accent.gamma_multiply(0.16) } else if resp.hovered() { pal.hover } else { Color32::TRANSPARENT };
     ui.painter().rect_filled(r, CornerRadius::same(7), fill);
@@ -943,7 +1099,17 @@ fn nav(ui: &mut egui::Ui, pal: &Pal, g: &str, label: &str, count: Option<usize>,
     if let Some(n) = count.filter(|n| *n > 0) {
         ui.painter().text(r.right_center() - Vec2::new(10.0, 0.0), egui::Align2::RIGHT_CENTER, n.to_string(), egui::FontId::proportional(12.0), pal.faint);
     }
-    resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+enum FolderAct {
+    Add(String),
+    CancelNew,
+    StartRename(String),
+    Rename(String, String),
+    CancelRename,
+    Move(usize, usize),
+    Delete(String),
 }
 
 fn group_header(ui: &mut egui::Ui, pal: &Pal, t: &str, n: usize) {

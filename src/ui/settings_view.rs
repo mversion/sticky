@@ -311,7 +311,7 @@ fn categories(ui: &mut egui::Ui, pal: &Pal, s: &mut Settings, new_cat: &mut Stri
             if ui.add_enabled(i > 0, egui::Button::new(icon("\u{E70E}", 11.0, pal.dim)).frame(false)).on_hover_text("Move up").clicked() {
                 up = Some(i);
             }
-            if ui.add_enabled(n > 1, egui::Button::new(icon(ic::DELETE, 11.0, pal.dim)).frame(false)).on_hover_text("Remove (items keep their category under Other)").clicked() {
+            if ui.add_enabled(n > 1, egui::Button::new(icon(ic::DELETE, 11.0, pal.dim)).frame(false)).on_hover_text("Remove (its items show under Other)").clicked() {
                 remove = Some(i);
             }
             let tag: String = s.categories[i].chars().filter(|c| c.is_alphanumeric()).collect::<String>().to_lowercase();
@@ -326,7 +326,7 @@ fn categories(ui: &mut egui::Ui, pal: &Pal, s: &mut Settings, new_cat: &mut Stri
     }
     ui.horizontal(|ui| {
         ui.add_space(4.0);
-        let r = ui.add(egui::TextEdit::singleline(new_cat).hint_text("New category").desired_width(200.0));
+        let r = ui.add(egui::TextEdit::singleline(new_cat).hint_text("New folder").desired_width(200.0));
         let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
         if (ui.button("Add").clicked() || enter) && !new_cat.trim().is_empty() {
             s.categories.push(new_cat.trim().to_string());

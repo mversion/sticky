@@ -30,7 +30,6 @@ pub mod ic {
     pub const RESTORE: &str = "\u{E923}";
     pub const FLAG: &str = "\u{E7C1}";
     pub const HISTORY: &str = "\u{E81C}";
-    pub const LIST: &str = "\u{E8FD}";
     pub const LINK: &str = "\u{E71B}";
     pub const NOTE: &str = "\u{E70B}";
     pub const REPEAT: &str = "\u{E8EE}";
@@ -385,7 +384,7 @@ pub fn item_row(ui: &mut egui::Ui, it: &Item, pal: &Pal, s: &Settings, o: &RowOp
                         chip(ui, ic::FLAG, it.priority.label(), priority_color(it.priority, pal));
                     }
                     if o.show_category && !it.category.is_empty() {
-                        chip(ui, ic::LIST, &it.category, pal.dim);
+                        chip(ui, ic::FOLDER, &it.category, pal.dim);
                     }
                     for t in &it.tags {
                         chip(ui, "", &format!("#{t}"), pal.blue);
@@ -580,7 +579,7 @@ pub fn preview(ui: &mut egui::Ui, p: &crate::parse::Parsed, pal: &Pal, s: &Setti
         if p.priority != Priority::None {
             chip(ui, ic::FLAG, p.priority.label(), priority_color(p.priority, pal));
         }
-        chip(ui, ic::LIST, cat, pal.dim);
+        chip(ui, ic::FOLDER, cat, pal.dim);
         for t in &p.tags {
             chip(ui, "", &format!("#{t}"), pal.blue);
         }
