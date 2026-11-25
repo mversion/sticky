@@ -1,6 +1,6 @@
 [package]
 name = "sticky"
-version = "0.1.5"
+version = "0.1.6"
 edition = "2024"
 description = "Fast post-it notes, to-dos and reminders for Windows"
 license = "MIT"
