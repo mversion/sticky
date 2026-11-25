@@ -157,6 +157,7 @@ pub fn add_alert(text: &str, detail: &str, source: &str, picture: Option<String>
         tags: vec![],
         pinned: false,
         order: 0,
+        steps: vec![],
         notes: String::new(),
         detail: detail.trim().to_string(),
         source: source.to_string(),

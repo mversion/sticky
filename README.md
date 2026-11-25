@@ -51,6 +51,8 @@ An optional always-on-top sticky note shows open items and what got done today.
 - `note: …` makes a note (no tick box); anything added on the Notes page is a note
 - web addresses (`https://…`, `www.…`) stay as typed and show as clickable link chips
 
+Click an item to edit it: notes, steps (ticking the last step ticks the item off; a repeating one moves to its next time with its steps cleared), when, pop-up, repeat, category, priority, type. Steps can be ticked on the reminder pop-up too.
+
 Reminder pop-ups stay on top with Done, Snooze and more snooze choices, and play a sound you pick in Settings > Reminders (Alarm by default, with a Test button, a loudness boost up to x8, music turned down while it plays, and an option to repeat it every minute until you respond). Reminders missed while the
 PC was off pop up when it's back.
 
@@ -116,7 +118,7 @@ window locks). `tools\grab.ps1 -Title "Sticky" -Out x.png [-ProcessId n]` screen
 window. `sticky ha-import` copies the desk dashboard's Home Assistant sign-in into the settings,
 `sticky ha-watch` runs only the Home Assistant connection, and `STICKY_FAKE_PRINT_END=1` makes it
 send a print alert as soon as it connects. `STICKY_SETTINGS_SEARCH=<words>` pre-fills the settings
-search (for screenshots).
+search and `STICKY_EDIT=<id>` opens that item's editor (for screenshots).
 
 ### Releasing
 

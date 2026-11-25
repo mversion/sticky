@@ -390,6 +390,11 @@ pub fn item_row(ui: &mut egui::Ui, it: &Item, pal: &Pal, s: &Settings, o: &RowOp
                     for t in &it.tags {
                         chip(ui, "", &format!("#{t}"), pal.blue);
                     }
+                    if !it.steps.is_empty() {
+                        let n = it.steps.iter().filter(|x| x.done).count();
+                        let all = n == it.steps.len();
+                        chip(ui, ic::DONE_ALL, &format!("{n} of {}", it.steps.len()), if all { pal.green } else { pal.dim });
+                    }
                     for l in &links {
                         let r = egui::Frame::new()
                             .fill(pal.blue.gamma_multiply(0.14))
@@ -410,7 +415,7 @@ pub fn item_row(ui: &mut egui::Ui, it: &Item, pal: &Pal, s: &Settings, o: &RowOp
                         chip(ui, ic::CHECK, &format!("Done {}", store::describe_due(d, false, s.use_24h)), pal.faint);
                     }
                 };
-                if it.pinned || it.due.is_some() || it.repeat.is_some() || it.priority != Priority::None || (o.show_category && !it.category.is_empty()) || !it.tags.is_empty() || it.done || !links.is_empty() {
+                if it.pinned || it.due.is_some() || it.repeat.is_some() || it.priority != Priority::None || (o.show_category && !it.category.is_empty()) || !it.tags.is_empty() || it.done || !links.is_empty() || !it.steps.is_empty() {
                     any = true;
                 }
                 if any {
@@ -540,6 +545,7 @@ pub fn item_from(p: &crate::parse::Parsed, s: &Settings, fallback_cat: Option<&s
         tags: p.tags.clone(),
         pinned: false,
         order: 0,
+        steps: vec![],
         notes: String::new(),
         detail: String::new(),
         source: String::new(),

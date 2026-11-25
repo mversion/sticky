@@ -23,6 +23,7 @@ struct Popup {
     last_ring: std::time::Instant,
     detail: String,
     notes: String,
+    steps: Vec<crate::store::Step>,
     source: String,
     picture: Option<(egui::TextureHandle, std::path::PathBuf)>,
 }
@@ -77,6 +78,7 @@ pub fn run(id: u64, slot: i32, was: i64) {
                 last_ring: std::time::Instant::now(),
                 detail: item.detail.clone(),
                 notes: item.notes.clone(),
+                steps: item.steps.clone(),
                 source: item.source.clone(),
                 picture,
             }))
@@ -155,6 +157,19 @@ impl eframe::App for Popup {
             if !self.detail.is_empty() {
                 ui.add_space(2.0);
                 ui.add(egui::Label::new(RichText::new(&self.detail).size(13.0 * self.settings.font_scale).color(pal.dim)).wrap());
+            }
+            if !self.steps.is_empty() {
+                ui.add_space(4.0);
+                let mut changed = false;
+                for st in self.steps.iter_mut() {
+                    let t = if st.done { RichText::new(&st.text).color(pal.faint).strikethrough() } else { RichText::new(&st.text).color(pal.text) };
+                    if ui.checkbox(&mut st.done, t).changed() {
+                        changed = true;
+                    }
+                }
+                if changed && crate::store::set_steps(self.id, self.steps.clone(), !self.repeats) {
+                    close = true; // all steps done: the item is done
+                }
             }
             if !self.notes.trim().is_empty() {
                 ui.add_space(4.0);

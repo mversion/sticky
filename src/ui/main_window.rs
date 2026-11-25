@@ -31,6 +31,8 @@ struct Editor {
     id: u64,
     text: String,
     notes: String,
+    steps: Vec<store::Step>,
+    new_step: String,
     when: String,
     remind: bool,
     category: String,
@@ -104,7 +106,7 @@ pub fn run(mode: &str) {
                 "log" => View::Log,
                 _ => View::Open,
             };
-            Ok(Box::new(MainApp {
+            let mut app = MainApp {
                 mode: m,
                 view,
                 input: String::new(),
@@ -126,7 +128,12 @@ pub fn run(mode: &str) {
                 ha: Default::default(),
                 frames: 0,
                 ctx: cc.egui_ctx.clone(),
-            }))
+            };
+            // for screenshots: open an item's editor straight away
+            if let Some(id) = std::env::var("STICKY_EDIT").ok().and_then(|v| v.parse().ok()) {
+                app.act(id, RowAct::Open);
+            }
+            Ok(Box::new(app))
         }),
     );
 }
@@ -232,6 +239,8 @@ impl MainApp {
                         id,
                         text: i.text.clone(),
                         notes: i.notes.clone(),
+                        steps: i.steps.clone(),
+                        new_step: String::new(),
                         when: i.due.map(|d| if i.all_day { d.format("%-d/%-m/%Y").to_string() } else { d.format("%-d/%-m/%Y %-I:%M%P").to_string() }).unwrap_or_default(),
                         remind: i.remind,
                         category: i.category.clone(),
@@ -301,6 +310,16 @@ impl MainApp {
                 }
             }
         });
+        let steps: Vec<store::Step> = e.steps.iter().filter(|x| !x.text.trim().is_empty()).cloned().collect();
+        let pending = e.new_step.trim().to_string();
+        let mut steps = steps;
+        if !pending.is_empty() {
+            // typed a step and pressed Save without Enter
+            steps.push(store::Step { text: pending, done: false });
+        }
+        if Some(&steps) != self.data.get(e.id).map(|i| &i.steps) {
+            store::set_steps(e.id, steps, true);
+        }
         store::log("edited", e.id, &e.text);
         self.reload();
     }
@@ -409,6 +428,7 @@ impl MainApp {
         let mut cancel = false;
         let mut del = None;
         let s = self.settings.clone();
+        let mut steps_changed = false;
         let Some(e) = self.editor.as_mut() else { return };
         egui::Frame::new()
             .fill(pal.card)
@@ -437,6 +457,49 @@ impl MainApp {
                         ui.label(icon(ic::LINK, 12.0, pal.dim));
                         for l in &links {
                             ui.hyperlink_to(RichText::new(crate::parse::link_label(l)).color(pal.blue), l).on_hover_text(l.as_str());
+                        }
+                    });
+                }
+                if e.kind == Kind::Task {
+                    ui.add_space(6.0);
+                    let n = e.steps.iter().filter(|x| x.done).count();
+                    ui.label(RichText::new(if e.steps.is_empty() { "Steps".to_string() } else { format!("Steps  {n} of {}", e.steps.len()) }).color(pal.dim).size(12.0));
+                    let mut remove = None;
+                    let mut up = None;
+                    for (k, st) in e.steps.iter_mut().enumerate() {
+                        ui.horizontal(|ui| {
+                            if ui.checkbox(&mut st.done, "").changed() {
+                                steps_changed = true;
+                            }
+                            let r = ui.add(egui::TextEdit::singleline(&mut st.text).desired_width((ui.available_width() - 70.0).max(120.0)).text_color(if st.done { pal.faint } else { pal.text }));
+                            if r.lost_focus() {
+                                steps_changed = true;
+                            }
+                            if ui.add_enabled(k > 0, egui::Button::new(icon("\u{E70E}", 11.0, pal.dim)).frame(false)).on_hover_text("Move up").clicked() {
+                                up = Some(k);
+                            }
+                            if ui.add(egui::Button::new(icon(ic::DELETE, 11.0, pal.dim)).frame(false)).on_hover_text("Remove step").clicked() {
+                                remove = Some(k);
+                            }
+                        });
+                    }
+                    if let Some(k) = up {
+                        e.steps.swap(k, k - 1);
+                        steps_changed = true;
+                    }
+                    if let Some(k) = remove {
+                        e.steps.remove(k);
+                        steps_changed = true;
+                    }
+                    ui.horizontal(|ui| {
+                        ui.label(icon(ic::ADD, 12.0, pal.accent));
+                        let r = ui.add(egui::TextEdit::singleline(&mut e.new_step).hint_text("Add a step (Enter)").desired_width((ui.available_width() - 70.0).max(120.0)));
+                        let enter = r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
+                        if (enter || ui.button("Add").clicked()) && !e.new_step.trim().is_empty() {
+                            e.steps.push(store::Step { text: e.new_step.trim().to_string(), done: false });
+                            e.new_step.clear();
+                            steps_changed = true;
+                            r.request_focus();
                         }
                     });
                 }
@@ -509,6 +572,11 @@ impl MainApp {
                     });
                 });
             });
+        if steps_changed && let Some(e) = &self.editor {
+            let steps: Vec<store::Step> = e.steps.iter().filter(|x| !x.text.trim().is_empty()).cloned().collect();
+            store::set_steps(e.id, steps, true);
+            self.reload();
+        }
         if ui.input(|i| i.key_pressed(Key::Escape)) {
             cancel = true;
         }
