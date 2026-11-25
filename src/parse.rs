@@ -9,14 +9,18 @@
 //! - relative:  `in 10 min`, `in 2 hours`, `in an hour`, `in half an hour`, `in 3 days`, `in 10m`
 //! - dates:     `today`, `tomorrow`/`tmrw`, `day after tomorrow`, `(on|next|this) friday`,
 //!              `next week`, `25/12`, `25/12/2027`, `25 dec`, `dec 25th`
-//! - repeat:    `every day`/`daily`, `every weekday`, `every monday`, `every week`/`weekly`,
-//!              `every month`/`monthly`
+//! - repeat:    `every day`/`daily`, `every weekday`, `every weekend`, `every monday`,
+//!              `every mon, wed and fri`, `every week`/`weekly`, `fortnightly`, `every month`/`monthly`,
+//!              `every year`/`yearly`, `every other day`, `every 3 days`, `every 2 weeks`,
+//!              `every 30 minutes`/`every 30m`, `every hour`/`hourly`, `every half hour`,
+//!              and for minutes/hours `between 9am and 5pm` / `from 9 to 5`
 //! - priority:  `!` low, `!!` medium, `!!!` high, or `!low` `!med` `!high`, `p1` `p2` `p3`, `urgent`, `asap`
 //! - category:  `#upnext`, `#later`, `#today` … (matched against your categories, prefix ok);
 //!              any other `#word` becomes a tag
 
-use crate::store::{Kind, Priority, Repeat};
-use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime, NaiveTime, Weekday};
+use crate::repeat::{Repeat, Unit, WEEKEND, day_bit};
+use crate::store::{Kind, Priority};
+use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime, NaiveTime, Timelike, Weekday};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Parsed {
@@ -95,7 +99,8 @@ pub fn parse(input: &str, now: NaiveDateTime, o: &Opts) -> Parsed {
     let mut priority = Priority::None;
     let mut category: Option<String> = None;
     let mut tags = vec![];
-    let mut repeat_weekday: Option<Weekday> = None;
+    let mut window: Option<(NaiveTime, NaiveTime)> = None;
+    let mut only_days: u8 = 0;
 
     let n = toks.len();
     let mut i = 0;
@@ -128,6 +133,15 @@ pub fn parse(input: &str, now: NaiveDateTime, o: &Opts) -> Parsed {
         } else if w == "monthly" {
             repeat = Some(Repeat::Monthly);
             take = 1;
+        } else if w == "yearly" || w == "annually" {
+            repeat = Some(Repeat::Yearly);
+            take = 1;
+        } else if w == "hourly" {
+            repeat = Some(Repeat::every(1, Unit::Hours));
+            take = 1;
+        } else if w == "fortnightly" {
+            repeat = Some(Repeat::every(2, Unit::Weeks));
+            take = 1;
         } else if w == "every" || w == "each" {
             let a = next(1);
             if a == "day" || a == "morning" {
@@ -145,10 +159,44 @@ pub fn parse(input: &str, now: NaiveDateTime, o: &Opts) -> Parsed {
             } else if a == "month" {
                 repeat = Some(Repeat::Monthly);
                 take = 2;
-            } else if let Some(wd) = weekday(a) {
-                repeat = Some(Repeat::Weekly);
-                repeat_weekday = Some(wd);
+            } else if a == "year" {
+                repeat = Some(Repeat::Yearly);
                 take = 2;
+            } else if a == "weekend" || a == "weekends" {
+                repeat = Some(Repeat::Every { n: 1, unit: Unit::Weeks, days: WEEKEND, window: None });
+                take = 2;
+            } else if a == "fortnight" {
+                repeat = Some(Repeat::every(2, Unit::Weeks));
+                take = 2;
+            } else if a == "hour" || a == "minute" {
+                repeat = Some(Repeat::every(1, if a == "hour" { Unit::Hours } else { Unit::Minutes }));
+                take = 2;
+            } else if a == "half" && (next(2) == "hour" || (matches!(next(2), "an" | "a") && next(3) == "hour")) {
+                repeat = Some(Repeat::every(30, Unit::Minutes));
+                take = if next(2) == "hour" { 3 } else { 4 };
+            } else if matches!(a, "other" | "second") && let Some(u) = Unit::parse(next(2)) {
+                repeat = Some(Repeat::every(2, u));
+                take = 3;
+            } else if let Some(mask) = weekday_list(a) {
+                // every monday / every mon, wed and fri / every mon/thu
+                let (mut mask, mut k, mut good) = (mask, 2, 2);
+                loop {
+                    let t = next(k);
+                    if matches!(t, "and" | "&" | ",") {
+                        k += 1;
+                    } else if let Some(m) = weekday_list(t) {
+                        mask |= m;
+                        k += 1;
+                        good = k;
+                    } else {
+                        break;
+                    }
+                }
+                repeat = Some(Repeat::Every { n: 1, unit: Unit::Weeks, days: mask, window: None });
+                take = good;
+            } else if let Some((n, u, k)) = interval(a, next(2)) {
+                repeat = Some(Repeat::every(n, u));
+                take = 1 + k;
             }
         }
         // ---- relative: in 10 min / in an hour / in half an hour / in 10m
@@ -201,6 +249,19 @@ pub fn parse(input: &str, now: NaiveDateTime, o: &Opts) -> Parsed {
                 time = day_part(&w);
             }
             take = 1;
+        }
+        // ---- days for minute/hour repeats: (on) weekdays / weekends
+        else if matches!(w.as_str(), "weekdays" | "weekends") || (w == "on" && matches!(next(1), "weekdays" | "weekends")) {
+            let word = if w == "on" { next(1) } else { w.as_str() };
+            only_days = if word == "weekdays" { crate::repeat::WEEKDAYS } else { WEEKEND };
+            take = if w == "on" { 2 } else { 1 };
+        }
+        // ---- a time window for minute/hour repeats: between 9am and 5pm, from 9 to 5, 9am-5pm
+        else if matches!(w.as_str(), "between" | "from")
+            && let Some((a, b, k)) = time_window(&[next(1), next(2), next(3), next(4), next(5)])
+        {
+            window = Some((a, b));
+            take = 1 + k;
         }
         // ---- calendar dates: 25/12, on 25/12, 25 dec, dec 25th
         else if let Some((d, k)) = calendar_date(&[&w, next(1), next(2)], today) {
@@ -268,16 +329,38 @@ pub fn parse(input: &str, now: NaiveDateTime, o: &Opts) -> Parsed {
         text = c.to_uppercase().collect::<String>() + &text[c.len_utf8()..];
     }
 
+    // ---- a window only means something for minute/hour repeats; otherwise its start is the time
+    if only_days != 0
+        && let Some(Repeat::Every { n, unit, window: wnd, .. }) = repeat
+        && (unit.intraday() || unit == Unit::Weeks)
+    {
+        repeat = Some(Repeat::Every { n, unit, days: only_days, window: wnd });
+    } else if only_days == crate::repeat::WEEKDAYS && repeat.is_none() {
+        repeat = Some(Repeat::Weekdays);
+    }
+    if let Some((a, b)) = window {
+        let mins = |t: NaiveTime| (t.hour() * 60 + t.minute()) as u16;
+        match repeat {
+            Some(Repeat::Every { n, unit, days, .. }) if unit.intraday() => {
+                repeat = Some(Repeat::Every { n, unit, days, window: Some((mins(a), mins(b))) });
+            }
+            _ => {
+                if time.is_none() {
+                    time = Some(a);
+                }
+            }
+        }
+    }
+
     // ---- work out the due time
     let mut all_day = false;
+    let intraday = repeat.is_some_and(|r| r.intraday());
     let due = if let Some(r) = rel {
         Some(now + r)
+    } else if intraday && date.is_none() && time.is_none() {
+        // "drink water every 30 minutes": the first one is one interval from now
+        repeat.map(|r| r.next_naive(now))
     } else if date.is_some() || time.is_some() || repeat.is_some() {
-        if let Some(wd) = repeat_weekday
-            && date.is_none()
-        {
-            date = Some(if today.weekday() == wd { today } else { next_weekday(today, wd) });
-        }
         let t = match time {
             Some(t) => t,
             None => {
@@ -285,31 +368,22 @@ pub fn parse(input: &str, now: NaiveDateTime, o: &Opts) -> Parsed {
                 o.default_time
             }
         };
-        let mut dt = date.unwrap_or(today).and_time(t);
-        if dt <= now && date.is_none() {
-            // A bare time that has passed today means tomorrow (or the next repeat).
-            dt = match repeat {
-                Some(Repeat::Weekdays) => {
-                    let mut d = dt + Duration::days(1);
-                    while matches!(d.weekday(), Weekday::Sat | Weekday::Sun) {
-                        d += Duration::days(1);
-                    }
-                    d
-                }
-                Some(Repeat::Weekly) => dt + Duration::days(7),
-                Some(Repeat::Monthly) => dt.checked_add_months(chrono::Months::new(1)).unwrap_or(dt),
-                _ => dt + Duration::days(1),
-            };
-        } else if dt <= now && repeat_weekday.is_some() {
-            dt += Duration::days(7);
-        }
-        Some(dt)
+        let start = date.unwrap_or(today).and_time(t);
+        // A day-only repeat may start today even though its default time has passed.
+        let since = if time.is_none() && !remind { today.and_time(NaiveTime::MIN) - Duration::seconds(1) } else { now };
+        Some(match repeat {
+            // the first occurrence on an allowed day that is still to come
+            Some(r) if date.is_none() => r.first_from(start, since),
+            // a bare time that has passed today means tomorrow
+            _ if start <= now && date.is_none() => start + Duration::days(1),
+            _ => start,
+        })
     } else {
         None
     };
 
     let timed = due.is_some() && !all_day;
-    let remind = kind == Kind::Task && due.is_some() && (remind || (o.remind_when_timed && timed));
+    let remind = kind == Kind::Task && due.is_some() && (remind || intraday || (o.remind_when_timed && timed));
 
     Parsed { text, kind, due, all_day: all_day && !remind, remind, priority, category, tags, repeat }
 }
@@ -351,6 +425,44 @@ fn weekday(w: &str) -> Option<Weekday> {
         "sunday" | "sun" => Weekday::Sun,
         _ => return None,
     })
+}
+
+/// `monday`, `mon`, or `mon/wed/fri` as a weekday mask.
+fn weekday_list(w: &str) -> Option<u8> {
+    let mut mask = 0u8;
+    for part in w.split('/') {
+        mask |= day_bit(weekday(part.trim_end_matches('s').trim_end_matches("day").trim()).or_else(|| weekday(part))?);
+    }
+    (mask != 0).then_some(mask)
+}
+
+/// After "every": `30 minutes`, `2 weeks`, `three days`, `30m`, `2h`, `90min`.
+fn interval(a: &str, b: &str) -> Option<(u32, Unit, usize)> {
+    let whole = |v: f64| (v >= 1.0 && v.fract() == 0.0).then_some(v as u32);
+    if let Some(p) = a.find(|c: char| c.is_alphabetic())
+        && p > 0
+        && let (Ok(v), Some(u)) = (a[..p].parse::<u32>(), Unit::parse(&a[p..]))
+    {
+        return (v >= 1).then_some((v, u, 1));
+    }
+    let n = whole(number_word(a)?)?;
+    Some((n, Unit::parse(b)?, 2))
+}
+
+/// `9am and 5pm`, `9 to 5`, `9:30 until 17:00`, `9am-5pm`: start, end and tokens used.
+fn time_window(w: &[&str]) -> Option<(NaiveTime, NaiveTime, usize)> {
+    if let Some((x, y)) = w[0].split_once('-')
+        && let (Some((a, _)), Some((b, _))) = (clock(x, "", true), clock(y, "", true))
+    {
+        return (a < b).then_some((a, b, 1));
+    }
+    let (a, u1) = clock(w[0], w[1], true)?;
+    if !matches!(w.get(u1).copied().unwrap_or(""), "and" | "to" | "until" | "till" | "-" | "–") {
+        return None;
+    }
+    let (b, u2) = clock(w.get(u1 + 1).copied().unwrap_or(""), w.get(u1 + 2).copied().unwrap_or(""), true)?;
+    // "from 9 to 5": an end before the start is afternoon
+    (a < b).then_some((a, b, u1 + 1 + u2))
 }
 
 /// The next `wd` after today (a week away if today is `wd`).
@@ -651,9 +763,49 @@ mod tests {
         assert_eq!(r.due, at(25, 20, 0));
         assert_eq!(r.text, "Take tablets");
         let r = p("team standup every monday at 9am");
-        assert_eq!(r.repeat, Some(Repeat::Weekly));
+        assert_eq!(r.repeat, Some(Repeat::Every { n: 1, unit: Unit::Weeks, days: day_bit(Weekday::Mon), window: None }));
+        assert_eq!(r.text, "Team standup");
         assert_eq!(r.due, Some(NaiveDate::from_ymd_opt(2026, 11, 30).unwrap().and_hms_opt(9, 0, 0).unwrap()));
         assert_eq!(p("backup every weekday at 5pm").repeat, Some(Repeat::Weekdays));
+    }
+    #[test]
+    fn intervals() {
+        let r = p("Drink water every 30 minutes");
+        assert_eq!(r.text, "Drink water");
+        assert_eq!(r.repeat, Some(Repeat::every(30, Unit::Minutes)));
+        assert_eq!(r.due, Some(now() + Duration::minutes(30)));
+        assert!(r.remind);
+        assert_eq!(p("stretch every 2h").repeat, Some(Repeat::every(2, Unit::Hours)));
+        assert_eq!(p("stretch every hour").repeat, Some(Repeat::every(1, Unit::Hours)));
+        assert_eq!(p("stretch every half an hour").repeat, Some(Repeat::every(30, Unit::Minutes)));
+        assert_eq!(p("water plants every 3 days").repeat, Some(Repeat::every(3, Unit::Days)));
+        assert_eq!(p("water plants every other day").repeat, Some(Repeat::every(2, Unit::Days)));
+        assert_eq!(p("pay cleaner fortnightly").repeat, Some(Repeat::every(2, Unit::Weeks)));
+        assert_eq!(p("renew rego every year").repeat, Some(Repeat::Yearly));
+        let r = p("drink water every 30 min between 9am and 5pm");
+        assert_eq!(r.text, "Drink water");
+        assert_eq!(r.repeat, Some(Repeat::Every { n: 30, unit: Unit::Minutes, days: 0, window: Some((540, 1020)) }));
+        let r = p("stand up every hour from 9 to 5");
+        assert_eq!(r.repeat, Some(Repeat::Every { n: 1, unit: Unit::Hours, days: 0, window: Some((540, 1020)) }));
+        assert_eq!(r.text, "Stand up");
+        // 10:00 now: before the window opens tomorrow? no, inside it: next hour
+        assert_eq!(r.due, at(25, 11, 0));
+        let r = p("drink water every 30 min between 9 and 5 on weekdays");
+        assert_eq!(r.text, "Drink water");
+        assert_eq!(r.repeat, Some(Repeat::Every { n: 30, unit: Unit::Minutes, days: crate::repeat::WEEKDAYS, window: Some((540, 1020)) }));
+        // a day-only repeat starts today
+        assert_eq!(p("pay cleaner fortnightly").due.unwrap().date(), now().date());
+        assert_eq!(p("call mum every week").due.unwrap().date(), now().date());
+    }
+    #[test]
+    fn weekday_lists() {
+        let r = p("gym every mon, wed and fri at 6pm");
+        assert_eq!(r.text, "Gym");
+        let mask = day_bit(Weekday::Mon) | day_bit(Weekday::Wed) | day_bit(Weekday::Fri);
+        assert_eq!(r.repeat, Some(Repeat::Every { n: 1, unit: Unit::Weeks, days: mask, window: None }));
+        assert_eq!(r.due, at(25, 18, 0)); // today is Wednesday and 6pm is still to come
+        assert_eq!(p("mow lawn every weekend").repeat.map(|r| r.label()).as_deref(), Some("every weekend"));
+        assert_eq!(p("mow lawn every weekend").text, "Mow lawn");
     }
     #[test]
     fn tonight_and_noon() {

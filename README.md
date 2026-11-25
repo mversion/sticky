@@ -45,7 +45,7 @@ An optional always-on-top sticky note shows open items and what got done today.
 - times: `at 4pm`, `4:30pm`, `16:30`, `at 4` (1-6 means afternoon), `noon`, `tonight`, `tomorrow morning`, `this arvo`
 - relative: `in 10 min`, `in 2h`, `in an hour`, `in half an hour`, `in 3 days`
 - dates: `today`, `tomorrow`, `friday`, `next week`, `25/12` (day first), `3 jan`, `dec 1st`
-- repeats: `every day`, `daily`, `every weekday`, `every monday`, `weekly`, `monthly`
+- repeats: `every day`, `daily`, `every weekday`, `every weekend`, `every monday`, `every mon, wed and fri`, `weekly`, `fortnightly`, `monthly`, `yearly`, `every other day`, `every 3 days`, `every 2 weeks`, `every 30 minutes`, `every 2h`, `hourly`, and for those `between 9am and 5pm` / `from 9 to 5`. The item editor has the same as Microsoft To Do (daily, weekdays, weekly, monthly, yearly, custom) plus every N minutes or hours
 - priority: `!` `!!` `!!!`, `!high`, `p1`, `urgent`, `asap`
 - category: `#upnext`, `#later`, `#today`, `#someday` (prefixes work: `#up`); other `#words` become tags
 - `note: …` makes a note (no tick box)

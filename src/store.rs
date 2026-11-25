@@ -5,7 +5,7 @@
 //! `items.json` is the single source of truth and is shared by every Sticky process and by the
 //! desk dashboard tile. Writers take `store.lock`, re-read, change, and replace the file atomically.
 
-use chrono::{DateTime, Datelike, Duration, Local, NaiveDate, Weekday};
+use chrono::{DateTime, Datelike, Duration, Local, NaiveDate};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
@@ -65,43 +65,7 @@ impl Priority {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum Repeat {
-    Daily,
-    Weekdays,
-    Weekly,
-    Monthly,
-}
-impl Repeat {
-    pub fn label(self) -> &'static str {
-        match self {
-            Repeat::Daily => "every day",
-            Repeat::Weekdays => "weekdays",
-            Repeat::Weekly => "every week",
-            Repeat::Monthly => "every month",
-        }
-    }
-    /// The next occurrence strictly after `from`.
-    pub fn next(self, from: DateTime<Local>) -> DateTime<Local> {
-        let mut d = from;
-        match self {
-            Repeat::Daily => d + Duration::days(1),
-            Repeat::Weekly => d + Duration::days(7),
-            Repeat::Weekdays => {
-                loop {
-                    d += Duration::days(1);
-                    if !matches!(d.weekday(), Weekday::Sat | Weekday::Sun) {
-                        return d;
-                    }
-                }
-            }
-            Repeat::Monthly => from
-                .checked_add_months(chrono::Months::new(1))
-                .unwrap_or(from + Duration::days(30)),
-        }
-    }
-}
+pub use crate::repeat::Repeat;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Item {

@@ -267,7 +267,23 @@ impl MainApp {
                         i.due = None;
                     }
                 }
-                i.remind = e.remind && i.due.is_some() && e.kind == Kind::Task;
+                // A repeat with no date starts today, To Do style; minutes/hours start one interval from now.
+                if i.due.is_none()
+                    && let Some(r) = i.repeat
+                {
+                    let now = chrono::Local::now();
+                    let first = if r.intraday() {
+                        r.next_naive(now.naive_local())
+                    } else {
+                        let start = now.date_naive().and_time(s.default_time());
+                        r.first_from(start, if e.remind { now.naive_local() } else { start - chrono::Duration::seconds(1) })
+                    };
+                    i.due = first.and_local_timezone(chrono::Local).earliest();
+                    i.all_day = !e.remind && !r.intraday();
+                    i.fired = false;
+                }
+                let intraday = i.repeat.is_some_and(|r| r.intraday());
+                i.remind = (e.remind || intraday) && i.due.is_some() && e.kind == Kind::Task;
                 if changed_due || i.remind {
                     if changed_due {
                         i.fired = false;
@@ -423,12 +439,7 @@ impl MainApp {
                     ui.add_enabled(e.kind == Kind::Task, egui::Checkbox::new(&mut e.remind, "Remind me at that time"));
                     ui.end_row();
                     ui.label(RichText::new("Repeat").color(pal.dim));
-                    egui::ComboBox::from_id_salt("rep").selected_text(e.repeat.map(|r| r.label()).unwrap_or("Never")).show_ui(ui, |ui| {
-                        ui.selectable_value(&mut e.repeat, None, "Never");
-                        for r in [Repeat::Daily, Repeat::Weekdays, Repeat::Weekly, Repeat::Monthly] {
-                            ui.selectable_value(&mut e.repeat, Some(r), r.label());
-                        }
-                    });
+                    ui.vertical(|ui| repeat_editor(ui, &pal, &mut e.repeat));
                     ui.end_row();
                     ui.label(RichText::new("Category").color(pal.dim));
                     ui.horizontal_wrapped(|ui| {
@@ -984,4 +995,89 @@ impl eframe::App for MainApp {
             }
         }
     }
+}
+
+/// Never, the To Do presets, or Custom: every N minutes/hours/days/weeks/months/years, which days,
+/// and for minutes/hours an optional time window.
+fn repeat_editor(ui: &mut egui::Ui, pal: &Pal, rep: &mut Option<Repeat>) {
+    use crate::repeat::{Unit, time_label};
+    let cap = |s: String| s[..1].to_uppercase() + &s[1..];
+    let custom = rep.is_some_and(|r| r.is_custom());
+    let shown = match *rep {
+        None => "Never".to_string(),
+        Some(r) if r.is_custom() => "Custom".to_string(),
+        Some(r) => cap(r.label()),
+    };
+    egui::ComboBox::from_id_salt("rep").selected_text(shown).width(170.0).show_ui(ui, |ui| {
+        if ui.selectable_label(rep.is_none(), "Never").clicked() {
+            *rep = None;
+        }
+        for r in Repeat::PRESETS {
+            if ui.selectable_label(*rep == Some(r), cap(r.label())).clicked() {
+                *rep = Some(r);
+            }
+        }
+        ui.separator();
+        if ui.selectable_label(custom, "Custom…").clicked() && !custom {
+            *rep = Some(rep.map(|r| r.as_custom()).unwrap_or(Repeat::every(1, Unit::Days)));
+        }
+    });
+    let Some(Repeat::Every { mut n, mut unit, mut days, mut window }) = *rep else { return };
+    ui.add_space(4.0);
+    ui.horizontal(|ui| {
+        ui.label("Every");
+        ui.add(egui::DragValue::new(&mut n).range(1..=999).speed(0.2));
+        egui::ComboBox::from_id_salt("rep-unit").selected_text(if n == 1 { unit.singular() } else { unit.plural() }).width(90.0).show_ui(ui, |ui| {
+            for u in Unit::ALL {
+                ui.selectable_value(&mut unit, u, if n == 1 { u.singular() } else { u.plural() });
+            }
+        });
+    });
+    if unit == Unit::Weeks || unit.intraday() {
+        ui.horizontal(|ui| {
+            ui.label(if unit == Unit::Weeks { "On" } else { "Only on" });
+            for (i, l) in ["M", "T", "W", "T", "F", "S", "S"].iter().enumerate() {
+                let on = days & (1 << i) != 0;
+                let txt = RichText::new(*l).color(if on { pal.on_accent } else { pal.dim });
+                let b = egui::Button::new(txt).fill(if on { pal.accent } else { pal.card }).min_size(egui::vec2(26.0, 24.0));
+                if ui.add(b).on_hover_text(["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][i]).clicked() {
+                    days ^= 1 << i;
+                }
+            }
+            if days == 0 && unit.intraday() {
+                ui.label(RichText::new("every day").color(pal.faint).size(12.0));
+            }
+        });
+    } else {
+        days = 0;
+    }
+    if unit.intraday() {
+        ui.horizontal(|ui| {
+            let mut on = window.is_some();
+            if ui.checkbox(&mut on, "Only between").changed() {
+                window = on.then_some((9 * 60, 17 * 60));
+            }
+            if let Some((a, b)) = &mut window {
+                let pick = |ui: &mut egui::Ui, id: &str, v: &mut u16| {
+                    egui::ComboBox::from_id_salt(id).selected_text(time_label(*v)).width(80.0).height(260.0).show_ui(ui, |ui| {
+                        for m in (0..24 * 60).step_by(30) {
+                            ui.selectable_value(v, m as u16, time_label(m as u16));
+                        }
+                        ui.selectable_value(v, 23 * 60 + 59, time_label(23 * 60 + 59));
+                    });
+                };
+                pick(ui, "rep-from", a);
+                ui.label("and");
+                pick(ui, "rep-to", b);
+                if *b <= *a {
+                    ui.label(RichText::new("end is before start").color(pal.red).size(12.0));
+                }
+            }
+        });
+    } else {
+        window = None;
+    }
+    let r = Repeat::Every { n, unit, days, window };
+    *rep = Some(r);
+    ui.label(RichText::new(format!("Repeats {}", r.label())).color(pal.faint).size(12.0));
 }

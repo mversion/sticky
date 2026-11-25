@@ -19,6 +19,7 @@ mod daemon;
 mod icon;
 mod kite;
 mod parse;
+mod repeat;
 mod settings;
 mod setup;
 mod sound;

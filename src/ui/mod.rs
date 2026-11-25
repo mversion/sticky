@@ -367,7 +367,7 @@ pub fn item_row(ui: &mut egui::Ui, it: &Item, pal: &Pal, s: &Settings, o: &RowOp
                         chip(ui, g, &txt, c);
                     }
                     if let Some(r) = it.repeat {
-                        chip(ui, ic::REPEAT, r.label(), pal.dim);
+                        chip(ui, ic::REPEAT, &r.label(), pal.dim);
                     }
                     if it.priority != Priority::None && !it.done {
                         chip(ui, ic::FLAG, it.priority.label(), priority_color(it.priority, pal));
@@ -528,7 +528,7 @@ pub fn preview(ui: &mut egui::Ui, p: &crate::parse::Parsed, pal: &Pal, s: &Setti
             chip(ui, if p.remind { ic::CLOCK } else { ic::CALENDAR }, &store::describe_due(d, p.all_day, s.use_24h), pal.text);
         }
         if let Some(r) = p.repeat {
-            chip(ui, ic::REPEAT, r.label(), pal.dim);
+            chip(ui, ic::REPEAT, &r.label(), pal.dim);
         }
         if p.priority != Priority::None {
             chip(ui, ic::FLAG, p.priority.label(), priority_color(p.priority, pal));
