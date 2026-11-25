@@ -5,16 +5,22 @@ Post-it notes, to-dos and reminders for Windows, written in Rust. Type what you 
 
 ## Install or upgrade
 
-In PowerShell:
+Download `sticky-setup.exe` from the [latest release](https://github.com/mversion/sticky/releases/latest)
+and run it. It installs for your account only (no admin) into `%LOCALAPPDATA%\Programs\Sticky`,
+adds Sticky to the Start menu and to Settings > Apps (uninstall it there), can start it with
+Windows and add a Kite launcher command, and closes any other copy that is running.
+The exe isn't signed, so Windows SmartScreen may warn the first time: More info > Run anyway.
+
+Or without the window, in PowerShell:
 
 ```powershell
 irm https://raw.githubusercontent.com/mversion/sticky/main/install.ps1 | iex
 ```
 
-This puts `sticky.exe` in `%LOCALAPPDATA%\Programs\Sticky`, adds a Start-menu shortcut and starts
-it. After that Sticky updates itself: the tray helper checks the GitHub releases twice a day and
+After that Sticky updates itself: the tray helper checks the GitHub releases twice a day and
 installs a new version when no Sticky window is open (Settings > Updates, or tray > Check for
-updates to do it now). Running the line again also upgrades.
+updates to do it now). Your notes and settings live in `%USERPROFILE%\.sticky` and survive
+upgrades and uninstalling.
 
 ## Using it
 
@@ -69,7 +75,8 @@ sticky                      quick add               sticky add <text>       add 
 sticky open|settings|log    main window on a page   sticky done|undo <id>   tick or untick
 sticky note                 the desktop note        sticky export           all items as JSON
 sticky kite [keyword]       add the Kite runner     sticky update           install the latest release
-sticky version
+sticky setup                installer window        sticky install          install without a window
+sticky uninstall [--quiet]  remove it               sticky version
 ```
 
 ### Developing

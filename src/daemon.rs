@@ -66,6 +66,7 @@ pub fn run() {
     }
     Settings::ensure_file();
     crate::update::cleanup();
+    crate::setup::refresh_registration();
     let settings = Settings::load();
     win::set_autostart(settings.start_with_windows);
 

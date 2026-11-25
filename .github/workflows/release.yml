@@ -33,6 +33,8 @@ jobs:
           Copy-Item target/release/sticky.exe dist/
           $h = (Get-FileHash dist/sticky.exe -Algorithm SHA256).Hash.ToLower()
           Set-Content dist/sticky.exe.sha256 "$h  sticky.exe" -NoNewline
+          # the same exe under the installer's name: double-clicked, it shows the setup window
+          Copy-Item target/release/sticky.exe dist/sticky-setup.exe
           Copy-Item install.ps1 dist/
 
       - uses: softprops/action-gh-release@v2

@@ -4,6 +4,7 @@ pub mod main_window;
 pub mod note;
 pub mod popup;
 pub mod settings_view;
+pub mod setup;
 pub mod toast;
 
 use crate::settings::Settings;

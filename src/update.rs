@@ -134,43 +134,9 @@ pub fn cleanup() {
 
 /// End every other sticky.exe running from this folder (helper, note, windows).
 fn stop_others() {
-    use windows_sys::Win32::Foundation::*;
-    use windows_sys::Win32::System::Diagnostics::ToolHelp::*;
-    use windows_sys::Win32::System::Threading::*;
-    let me = std::process::id();
-    let Ok(exe) = std::env::current_exe() else { return };
-    // compare resolved paths: one side may be in short (8.3) form
-    let real = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
-    let dir = real(exe.parent().unwrap_or(Path::new(".")));
-    unsafe {
-        let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-        if snap == INVALID_HANDLE_VALUE {
-            return;
-        }
-        let mut e: PROCESSENTRY32W = std::mem::zeroed();
-        e.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
-        let mut ok = Process32FirstW(snap, &mut e) != 0;
-        while ok {
-            let name = String::from_utf16_lossy(&e.szExeFile[..e.szExeFile.iter().position(|c| *c == 0).unwrap_or(0)]).to_lowercase();
-            if e.th32ProcessID != me && (name == "sticky.exe" || name == "sticky.old.exe") {
-                let h = OpenProcess(PROCESS_TERMINATE | PROCESS_QUERY_LIMITED_INFORMATION, 0, e.th32ProcessID);
-                if !h.is_null() {
-                    let mut buf = [0u16; 1024];
-                    let mut len = buf.len() as u32;
-                    if QueryFullProcessImageNameW(h, PROCESS_NAME_WIN32, buf.as_mut_ptr(), &mut len) != 0 {
-                        let p = PathBuf::from(String::from_utf16_lossy(&buf[..len as usize]));
-                        if p.parent().map(real).as_deref() == Some(dir.as_path()) {
-                            TerminateProcess(h, 0);
-                        }
-                    }
-                    CloseHandle(h);
-                }
-            }
-            ok = Process32NextW(snap, &mut e) != 0;
-        }
-        CloseHandle(snap);
+    if let Ok(exe) = std::env::current_exe() {
+        crate::win::stop_sticky(Some(exe.parent().unwrap_or(Path::new("."))));
     }
-    std::thread::sleep(std::time::Duration::from_millis(400));
 }
 
 #[cfg(test)]

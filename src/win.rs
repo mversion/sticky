@@ -186,22 +186,154 @@ pub fn play_reminder_sound() {
 const RUN_KEY: &str = "Software\\Microsoft\\Windows\\CurrentVersion\\Run";
 
 pub fn set_autostart(on: bool) {
+    set_run(if on { std::env::current_exe().ok() } else { None }.as_deref());
+}
+
+/// Point the HKCU Run entry "Sticky" at `exe` (its helper), or remove it.
+pub fn set_run(exe: Option<&std::path::Path>) {
+    match exe {
+        Some(e) => reg_set_str(RUN_KEY, "Sticky", &format!("\"{}\" daemon", e.display())),
+        None => reg_delete_value(RUN_KEY, "Sticky"),
+    }
+}
+
+// HKCU registry helpers. Failures are ignored: none of these is worth stopping for.
+
+fn reg_open(path: &str, create: bool) -> Option<HKEY> {
     unsafe {
         let mut key: HKEY = std::ptr::null_mut();
-        if RegOpenKeyExW(HKEY_CURRENT_USER, wide(RUN_KEY).as_ptr(), 0, KEY_SET_VALUE | KEY_QUERY_VALUE, &mut key) != 0 {
-            return;
-        }
-        let name = wide("Sticky");
-        if on {
-            if let Ok(exe) = std::env::current_exe() {
-                let v = wide(&format!("\"{}\" daemon", exe.display()));
-                RegSetValueExW(key, name.as_ptr(), 0, REG_SZ, v.as_ptr() as *const u8, (v.len() * 2) as u32);
-            }
+        let r = if create {
+            RegCreateKeyExW(HKEY_CURRENT_USER, wide(path).as_ptr(), 0, std::ptr::null(), 0, KEY_SET_VALUE | KEY_QUERY_VALUE, std::ptr::null(), &mut key, std::ptr::null_mut())
         } else {
-            RegDeleteValueW(key, name.as_ptr());
-        }
-        RegCloseKey(key);
+            RegOpenKeyExW(HKEY_CURRENT_USER, wide(path).as_ptr(), 0, KEY_SET_VALUE | KEY_QUERY_VALUE, &mut key)
+        };
+        (r == 0).then_some(key)
     }
+}
+
+pub fn reg_set_str(path: &str, name: &str, value: &str) {
+    if let Some(key) = reg_open(path, true) {
+        let v = wide(value);
+        unsafe {
+            RegSetValueExW(key, wide(name).as_ptr(), 0, REG_SZ, v.as_ptr() as *const u8, (v.len() * 2) as u32);
+            RegCloseKey(key);
+        }
+    }
+}
+
+pub fn reg_set_dword(path: &str, name: &str, value: u32) {
+    if let Some(key) = reg_open(path, true) {
+        unsafe {
+            RegSetValueExW(key, wide(name).as_ptr(), 0, REG_DWORD, &value as *const u32 as *const u8, 4);
+            RegCloseKey(key);
+        }
+    }
+}
+
+pub fn reg_get_str(path: &str, name: &str) -> Option<String> {
+    unsafe {
+        let mut buf = [0u16; 1024];
+        let mut size = (buf.len() * 2) as u32;
+        let r = RegGetValueW(HKEY_CURRENT_USER, wide(path).as_ptr(), wide(name).as_ptr(), RRF_RT_REG_SZ, std::ptr::null_mut(), buf.as_mut_ptr() as _, &mut size);
+        if r != 0 {
+            return None;
+        }
+        let n = buf.iter().position(|c| *c == 0).unwrap_or(0);
+        Some(String::from_utf16_lossy(&buf[..n]))
+    }
+}
+
+pub fn reg_delete_value(path: &str, name: &str) {
+    if let Some(key) = reg_open(path, false) {
+        unsafe {
+            RegDeleteValueW(key, wide(name).as_ptr());
+            RegCloseKey(key);
+        }
+    }
+}
+
+pub fn reg_delete_key(path: &str) {
+    unsafe {
+        RegDeleteTreeW(HKEY_CURRENT_USER, wide(path).as_ptr());
+    }
+}
+
+pub struct Proc {
+    pub pid: u32,
+    pub path: Option<std::path::PathBuf>,
+}
+
+/// Running processes whose exe name (lower case) is one of `names`.
+pub fn processes(names: &[&str]) -> Vec<Proc> {
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::*;
+    let mut out = vec![];
+    unsafe {
+        let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if snap == INVALID_HANDLE_VALUE {
+            return out;
+        }
+        let mut e: PROCESSENTRY32W = std::mem::zeroed();
+        e.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
+        let mut ok = Process32FirstW(snap, &mut e) != 0;
+        while ok {
+            let n = e.szExeFile.iter().position(|c| *c == 0).unwrap_or(0);
+            let name = String::from_utf16_lossy(&e.szExeFile[..n]).to_lowercase();
+            if names.contains(&name.as_str()) {
+                let mut path = None;
+                let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, e.th32ProcessID);
+                if !h.is_null() {
+                    let mut buf = [0u16; 1024];
+                    let mut len = buf.len() as u32;
+                    if QueryFullProcessImageNameW(h, PROCESS_NAME_WIN32, buf.as_mut_ptr(), &mut len) != 0 {
+                        path = Some(std::path::PathBuf::from(String::from_utf16_lossy(&buf[..len as usize])));
+                    }
+                    CloseHandle(h);
+                }
+                out.push(Proc { pid: e.th32ProcessID, path });
+            }
+            ok = Process32NextW(snap, &mut e) != 0;
+        }
+        CloseHandle(snap);
+    }
+    out
+}
+
+pub fn kill(pid: u32) {
+    unsafe {
+        let h = OpenProcess(PROCESS_TERMINATE, 0, pid);
+        if !h.is_null() {
+            TerminateProcess(h, 0);
+            CloseHandle(h);
+        }
+    }
+}
+
+/// Resolve a path for comparing (one side may be in short 8.3 form or differ in case).
+pub fn real_path(p: &std::path::Path) -> std::path::PathBuf {
+    std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf())
+}
+
+/// End every other Sticky process: those running from `folder`, or all of them when None.
+/// Returns how many were stopped.
+pub fn stop_sticky(folder: Option<&std::path::Path>) -> usize {
+    let me = std::process::id();
+    let dir = folder.map(real_path);
+    let mut n = 0;
+    for p in processes(&["sticky.exe", "sticky.old.exe"]) {
+        let here = match (&dir, &p.path) {
+            (None, _) => true,
+            (Some(d), Some(path)) => path.parent().map(real_path).as_ref() == Some(d),
+            _ => false,
+        };
+        if p.pid != me && here {
+            kill(p.pid);
+            n += 1;
+        }
+    }
+    if n > 0 {
+        std::thread::sleep(std::time::Duration::from_millis(500));
+    }
+    n
 }
 
 /// True when Windows apps are set to light mode.

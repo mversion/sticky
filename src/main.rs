@@ -11,12 +11,16 @@
 //!   sticky kite [keyword]        add the Kite runner command
 //!   sticky export                print all items as JSON (for scripts)
 //!   sticky update [--auto]       install the latest GitHub release if it's newer
+//!   sticky setup                 the installer window (also what sticky-setup.exe shows)
+//!   sticky install [--no-autostart] [--no-kite]   install without the window
+//!   sticky uninstall [--quiet]   remove it (Settings > Apps runs this)
 
 mod daemon;
 mod icon;
 mod kite;
 mod parse;
 mod settings;
+mod setup;
 mod store;
 mod ui;
 mod update;
@@ -32,7 +36,27 @@ fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let cmd = args.first().map(|s| s.to_lowercase()).unwrap_or_default();
     let rest = args.iter().skip(1).cloned().collect::<Vec<_>>().join(" ");
+    if cmd.is_empty() && setup::is_setup_exe() {
+        ui::setup::run();
+        return;
+    }
     match cmd.as_str() {
+        "setup" => ui::setup::run(),
+        "install" => {
+            let s = Settings::load();
+            let o = setup::Options {
+                autostart: !args.iter().any(|a| a == "--no-autostart"),
+                kite: (!args.iter().any(|a| a == "--no-kite")).then(|| kite::existing_keyword().unwrap_or(s.kite_keyword)),
+            };
+            match setup::install(&o) {
+                Ok((exe, notes)) => println!("Installed {}\n{}", exe.display(), notes.join("\n")),
+                Err(e) => {
+                    eprintln!("Install failed: {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
+        "uninstall" => setup::uninstall(args.iter().any(|a| a == "--quiet")),
         "" | "capture" | "new" => {
             daemon::ensure_running();
             daemon::open_ui("capture");
