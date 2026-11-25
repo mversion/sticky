@@ -48,7 +48,8 @@ An optional always-on-top sticky note shows open items and what got done today.
 - repeats: `every day`, `daily`, `every weekday`, `every weekend`, `every monday`, `every mon, wed and fri`, `weekly`, `fortnightly`, `monthly`, `yearly`, `every other day`, `every 3 days`, `every 2 weeks`, `every 30 minutes`, `every 2h`, `hourly`, and for those `between 9am and 5pm` / `from 9 to 5`. The item editor has the same as Microsoft To Do (daily, weekdays, weekly, monthly, yearly, custom) plus every N minutes or hours
 - priority: `!` `!!` `!!!`, `!high`, `p1`, `urgent`, `asap`
 - category: `#upnext`, `#later`, `#today`, `#someday` (prefixes work: `#up`); other `#words` become tags
-- `note: …` makes a note (no tick box)
+- `note: …` makes a note (no tick box); anything added on the Notes page is a note
+- web addresses (`https://…`, `www.…`) stay as typed and show as clickable link chips
 
 Reminder pop-ups stay on top with Done, Snooze and more snooze choices, and play a sound you pick in Settings > Reminders (Alarm by default, with a Test button, a loudness boost up to x8, music turned down while it plays, and an option to repeat it every minute until you respond). Reminders missed while the
 PC was off pop up when it's back.

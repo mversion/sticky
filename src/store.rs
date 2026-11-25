@@ -104,6 +104,9 @@ pub struct Item {
     /// Manual order inside a category (lower first).
     #[serde(default)]
     pub order: i64,
+    /// Your own notes on the item (several lines, links work).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub notes: String,
     /// A second line, for alerts ("Took 11h 56m").
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub detail: String,

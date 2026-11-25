@@ -22,6 +22,7 @@ struct Popup {
     rang: u32,
     last_ring: std::time::Instant,
     detail: String,
+    notes: String,
     source: String,
     picture: Option<(egui::TextureHandle, std::path::PathBuf)>,
 }
@@ -75,6 +76,7 @@ pub fn run(id: u64, slot: i32, was: i64) {
                 rang: 0,
                 last_ring: std::time::Instant::now(),
                 detail: item.detail.clone(),
+                notes: item.notes.clone(),
                 source: item.source.clone(),
                 picture,
             }))
@@ -153,6 +155,21 @@ impl eframe::App for Popup {
             if !self.detail.is_empty() {
                 ui.add_space(2.0);
                 ui.add(egui::Label::new(RichText::new(&self.detail).size(13.0 * self.settings.font_scale).color(pal.dim)).wrap());
+            }
+            if !self.notes.trim().is_empty() {
+                ui.add_space(4.0);
+                let n: String = self.notes.trim().chars().take(600).collect();
+                ui.add(egui::Label::new(RichText::new(n).size(13.0 * self.settings.font_scale).color(pal.dim)).wrap());
+            }
+            let links = crate::parse::links(&format!("{} {} {}", self.text, self.detail, self.notes));
+            if !links.is_empty() {
+                ui.add_space(4.0);
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(icon(ic::LINK, 12.0, pal.dim));
+                    for l in &links {
+                        ui.hyperlink_to(RichText::new(crate::parse::link_label(l)).color(pal.blue), l).on_hover_text(l.as_str());
+                    }
+                });
             }
             if let Some((tex, path)) = &self.picture {
                 ui.add_space(8.0);

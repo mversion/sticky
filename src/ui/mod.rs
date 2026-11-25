@@ -31,6 +31,7 @@ pub mod ic {
     pub const FLAG: &str = "\u{E7C1}";
     pub const HISTORY: &str = "\u{E81C}";
     pub const LIST: &str = "\u{E8FD}";
+    pub const LINK: &str = "\u{E71B}";
     pub const NOTE: &str = "\u{E70B}";
     pub const REPEAT: &str = "\u{E8EE}";
     pub const CALENDAR: &str = "\u{E787}";
@@ -314,6 +315,9 @@ pub struct RowOpts {
 /// One item: checkbox, text, and a line of chips. Hover shows pin and delete.
 pub fn item_row(ui: &mut egui::Ui, it: &Item, pal: &Pal, s: &Settings, o: &RowOpts) -> RowAct {
     let mut act = RowAct::None;
+    // link chips: drawn with the row, made clickable after it (so the row doesn't take their clicks)
+    let links = crate::parse::links(&format!("{} {}", it.text, it.notes));
+    let mut link_rects: Vec<(egui::Rect, String)> = vec![];
     let mut check: Option<egui::Rect> = None;
     let bg = ui.painter().add(egui::Shape::Noop);
     let pad = if o.compact { 4 } else { 7 };
@@ -338,6 +342,14 @@ pub fn item_row(ui: &mut egui::Ui, it: &Item, pal: &Pal, s: &Settings, o: &RowOp
                 ui.allocate_ui_with_layout(Vec2::new(w.max(60.0), 0.0), egui::Layout::left_to_right(egui::Align::Min).with_main_wrap(true), |ui| {
                     ui.add(egui::Label::new(t).wrap().selectable(false));
                 });
+                if let Some(first) = it.notes.lines().map(str::trim).find(|l| !l.is_empty()) {
+                    let more = it.notes.trim().lines().count() > 1;
+                    let line: String = first.chars().take(140).collect();
+                    let line = if more || first.chars().count() > 140 { format!("{line} …") } else { line };
+                    ui.allocate_ui_with_layout(Vec2::new(w.max(60.0), 0.0), egui::Layout::left_to_right(egui::Align::Min), |ui| {
+                        ui.add(egui::Label::new(RichText::new(line).size(12.5).color(pal.dim)).truncate().selectable(false));
+                    });
+                }
                 // meta line
                 let mut any = false;
                 let meta = |ui: &mut egui::Ui| {
@@ -378,13 +390,27 @@ pub fn item_row(ui: &mut egui::Ui, it: &Item, pal: &Pal, s: &Settings, o: &RowOp
                     for t in &it.tags {
                         chip(ui, "", &format!("#{t}"), pal.blue);
                     }
+                    for l in &links {
+                        let r = egui::Frame::new()
+                            .fill(pal.blue.gamma_multiply(0.14))
+                            .corner_radius(CornerRadius::same(6))
+                            .inner_margin(Margin::symmetric(6, 1))
+                            .show(ui, |ui| {
+                                ui.spacing_mut().item_spacing.x = 4.0;
+                                ui.horizontal(|ui| {
+                                    ui.label(icon(ic::LINK, 11.0, pal.blue));
+                                    ui.label(RichText::new(crate::parse::link_label(l)).size(12.0).color(pal.blue).underline());
+                                });
+                            });
+                        link_rects.push((r.response.rect, l.clone()));
+                    }
                     if it.done
                         && let Some(d) = it.done_at
                     {
                         chip(ui, ic::CHECK, &format!("Done {}", store::describe_due(d, false, s.use_24h)), pal.faint);
                     }
                 };
-                if it.pinned || it.due.is_some() || it.repeat.is_some() || it.priority != Priority::None || (o.show_category && !it.category.is_empty()) || !it.tags.is_empty() || it.done {
+                if it.pinned || it.due.is_some() || it.repeat.is_some() || it.priority != Priority::None || (o.show_category && !it.category.is_empty()) || !it.tags.is_empty() || it.done || !links.is_empty() {
                     any = true;
                 }
                 if any {
@@ -438,7 +464,18 @@ pub fn item_row(ui: &mut egui::Ui, it: &Item, pal: &Pal, s: &Settings, o: &RowOp
             x -= size + 2.0;
         }
     }
-    if act == RowAct::None && resp.clicked() {
+    let mut on_link = false;
+    for (n, (r, url)) in link_rects.iter().enumerate() {
+        let b = ui.interact(*r, ui.scope_id().with(("link", it.id, n)), Sense::click()).on_hover_text(url.as_str());
+        if b.hovered() {
+            on_link = true;
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+        if b.clicked() {
+            ui.ctx().open_url(egui::OpenUrl::new_tab(url));
+        }
+    }
+    if act == RowAct::None && resp.clicked() && !on_link {
         let at = resp.interact_pointer_pos();
         act = if tick_zone.zip(at).is_some_and(|(z, p)| z.contains(p)) { RowAct::Toggle } else { RowAct::Open };
     }
@@ -503,6 +540,7 @@ pub fn item_from(p: &crate::parse::Parsed, s: &Settings, fallback_cat: Option<&s
         tags: p.tags.clone(),
         pinned: false,
         order: 0,
+        notes: String::new(),
         detail: String::new(),
         source: String::new(),
         picture: None,

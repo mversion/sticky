@@ -30,6 +30,7 @@ pub enum View {
 struct Editor {
     id: u64,
     text: String,
+    notes: String,
     when: String,
     remind: bool,
     category: String,
@@ -181,7 +182,8 @@ impl MainApp {
             _ => None,
         };
         let mut item = item_from(&p, &self.settings, fallback.as_deref());
-        if self.view == View::Notes && text.find(':').is_none() {
+        // in Notes, what you add is a note (a colon in a link or a time used to make it a task)
+        if self.view == View::Notes {
             item.kind = Kind::Note;
             item.remind = false;
         }
@@ -229,6 +231,7 @@ impl MainApp {
                     self.editor = Some(Editor {
                         id,
                         text: i.text.clone(),
+                        notes: i.notes.clone(),
                         when: i.due.map(|d| if i.all_day { d.format("%-d/%-m/%Y").to_string() } else { d.format("%-d/%-m/%Y %-I:%M%P").to_string() }).unwrap_or_default(),
                         remind: i.remind,
                         category: i.category.clone(),
@@ -252,6 +255,7 @@ impl MainApp {
             if let Some(i) = d.get_mut(e.id) {
                 let changed_due;
                 i.text = e.text.trim().to_string();
+                i.notes = e.notes.trim_end().to_string();
                 i.category = e.category.clone();
                 i.priority = e.priority;
                 i.repeat = e.repeat;
@@ -341,7 +345,11 @@ impl MainApp {
                 });
             });
         if !self.input.trim().is_empty() {
-            let p = parse_with(&self.input, &self.settings);
+            let mut p = parse_with(&self.input, &self.settings);
+            if self.view == View::Notes {
+                p.kind = Kind::Note;
+                p.remind = false;
+            }
             let fallback = match &self.view {
                 View::Category(c) => Some(c.clone()),
                 _ => None,
@@ -414,6 +422,23 @@ impl MainApp {
                 if r.has_focus() && ui.input(|i| i.key_pressed(Key::Enter) && !i.modifiers.shift) {
                     e.text = e.text.trim_end_matches('\n').to_string();
                     save = true;
+                }
+                ui.add_space(4.0);
+                let rows = if e.notes.is_empty() { 1 } else { 3 };
+                ui.add(
+                    egui::TextEdit::multiline(&mut e.notes)
+                        .hint_text("Notes: details, links, anything (Enter for a new line)")
+                        .desired_rows(rows)
+                        .desired_width(f32::INFINITY),
+                );
+                let links = crate::parse::links(&format!("{} {}", e.text, e.notes));
+                if !links.is_empty() {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(icon(ic::LINK, 12.0, pal.dim));
+                        for l in &links {
+                            ui.hyperlink_to(RichText::new(crate::parse::link_label(l)).color(pal.blue), l).on_hover_text(l.as_str());
+                        }
+                    });
                 }
                 ui.add_space(6.0);
                 egui::Grid::new("ed").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {

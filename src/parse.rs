@@ -49,6 +49,34 @@ struct Tok {
     used: bool,
 }
 
+/// A word that is a web address: `https://…`, `http://…` or `www.…`.
+pub fn is_link(w: &str) -> bool {
+    let w = w.trim_start_matches(['(', '<', '[', '"', '\'']).to_lowercase();
+    (w.starts_with("https://") || w.starts_with("http://") || w.starts_with("www.")) && w.len() > 8
+}
+
+/// The web addresses in some text, ready to open (`www.` gets `https://`).
+pub fn links(text: &str) -> Vec<String> {
+    let mut out: Vec<String> = vec![];
+    for w in text.split_whitespace() {
+        if !is_link(w) {
+            continue;
+        }
+        let w = w.trim_start_matches(['(', '<', '[', '"', '\'']).trim_end_matches(['.', ',', ';', ':', '!', '?', ')', '>', ']', '"', '\'']);
+        let url = if w.to_lowercase().starts_with("www.") { format!("https://{w}") } else { w.to_string() };
+        if !out.contains(&url) {
+            out.push(url);
+        }
+    }
+    out
+}
+
+/// A short label for a link chip: the host and the start of the path.
+pub fn link_label(url: &str) -> String {
+    let s = url.split_once("://").map(|x| x.1).unwrap_or(url).trim_start_matches("www.").trim_end_matches('/');
+    if s.chars().count() > 32 { format!("{}…", s.chars().take(31).collect::<String>()) } else { s.to_string() }
+}
+
 pub fn parse(input: &str, now: NaiveDateTime, o: &Opts) -> Parsed {
     let mut kind = Kind::Task;
     let mut remind = false;
@@ -105,6 +133,11 @@ pub fn parse(input: &str, now: NaiveDateTime, o: &Opts) -> Parsed {
     let n = toks.len();
     let mut i = 0;
     while i < n {
+        // a web address is text, whatever digits or slashes it has
+        if is_link(&toks[i].w) {
+            i += 1;
+            continue;
+        }
         let w = toks[i].w.clone();
         let next = |k: usize| toks.get(i + k).map(|t| t.w.as_str()).unwrap_or("");
         let mut take = 0usize; // tokens consumed starting at i
@@ -325,7 +358,9 @@ pub fn parse(input: &str, now: NaiveDateTime, o: &Opts) -> Parsed {
     }
     let mut text = words.join(" ");
     text = text.trim().trim_end_matches([',', ';']).trim().to_string();
-    if let Some(c) = text.chars().next() {
+    if let Some(c) = text.chars().next()
+        && !is_link(&text.to_lowercase())
+    {
         text = c.to_uppercase().collect::<String>() + &text[c.len_utf8()..];
     }
 
@@ -816,5 +851,16 @@ mod tests {
     #[test]
     fn next_week() {
         assert_eq!(p("plan budget next week").due.unwrap().date(), NaiveDate::from_ymd_opt(2026, 11, 30).unwrap());
+    }
+
+    #[test]
+    fn links_stay_text() {
+        let r = p("read https://example.com/2024/12/25/story tomorrow");
+        assert_eq!(r.text, "Read https://example.com/2024/12/25/story");
+        assert_eq!(r.due.map(|d| d.date()), Some(now().date() + Duration::days(1)));
+        let r = p("https://example.com/a");
+        assert_eq!(r.text, "https://example.com/a");
+        assert_eq!(links("see (www.abc.com/x), and https://a.io/b."), vec!["https://www.abc.com/x".to_string(), "https://a.io/b".into()]);
+        assert_eq!(link_label("https://www.example.com/some/very/long/path/that/goes/on"), "example.com/some/very/long/path…");
     }
 }

@@ -8,7 +8,7 @@ repository = "https://github.com/mversion/sticky"
 
 [dependencies]
 chrono = { version = "0.4.45", features = ["serde"] }
-eframe = { version = "0.37.0", default-features = false, features = ["glow", "default_fonts", "accesskit"] }
+eframe = { version = "0.37.0", default-features = false, features = ["glow", "default_fonts", "accesskit", "clipboard", "links"] }
 global-hotkey = "0.10.0"
 raw-window-handle = "0.6.2"
 serde = { version = "1.0.229", features = ["derive"] }
