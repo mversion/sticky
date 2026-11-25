@@ -23,3 +23,7 @@ lto = "fat"
 codegen-units = 1
 panic = "abort"
 strip = true
+
+[build-dependencies]
+png = "0.18.1"
+winresource = "0.1.34"
