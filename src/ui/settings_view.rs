@@ -162,21 +162,23 @@ fn control(ui: &mut egui::Ui, pal: &Pal, key: &str, s: &mut Settings) {
         "sound" => {
             toggle(ui, pal, &mut s.sound);
             if ui.button(format!("{}  Test", ic::BELL)).clicked() {
-                crate::win::play_sound(&s.sound_name);
+                { s.save(); crate::sound::ring(&s.sound_name); }
             }
-            let sounds = crate::win::SOUNDS;
+            let sounds = crate::sound::SOUNDS;
             egui::ComboBox::from_id_salt("sound_name")
                 .selected_text(sounds.iter().find(|x| x.0 == s.sound_name).map(|x| x.1).unwrap_or("Alarm"))
                 .width(150.0)
                 .show_ui(ui, |ui| {
                     for (k, l, _) in sounds {
-                        if ui.selectable_value(&mut s.sound_name, k.to_string(), l).clicked() {
-                            crate::win::play_sound(k);
-                        }
+                        ui.selectable_value(&mut s.sound_name, k.to_string(), l);
                     }
                 });
         }
         "sound_repeat" => toggle(ui, pal, &mut s.sound_repeat),
+        "sound_duck" => toggle(ui, pal, &mut s.sound_duck),
+        "sound_boost" => {
+            ui.add(egui::Slider::new(&mut s.sound_boost, 1..=8).custom_formatter(|v, _| format!("x{v}")));
+        }
         "window_screen" => screen_picker(ui, "window_screen", &mut s.window_screen),
         "note_window" => toggle(ui, pal, &mut s.note_window),
         "note_on_top" => toggle(ui, pal, &mut s.note_on_top),

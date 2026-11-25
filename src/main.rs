@@ -21,6 +21,7 @@ mod kite;
 mod parse;
 mod settings;
 mod setup;
+mod sound;
 mod store;
 mod ui;
 mod update;
@@ -66,6 +67,7 @@ fn main() {
         "settings" => daemon::open_ui("settings"),
         "log" => daemon::open_ui("log"),
         "daemon" => daemon::run(),
+        "ring" => sound::run(args.get(1).map(String::as_str).unwrap_or("alarm")),
         "note" => ui::note::run(),
         "popup" => {
             let id = args.get(1).and_then(|s| s.parse().ok()).unwrap_or(0);

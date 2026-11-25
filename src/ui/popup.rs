@@ -90,7 +90,7 @@ impl eframe::App for Popup {
         if self.settings.sound {
             let due = if self.rang == 0 { self.frames >= 2 } else { self.settings.sound_repeat && self.rang < 10 && self.last_ring.elapsed().as_secs() >= 60 };
             if due {
-                win::play_sound(&self.settings.sound_name);
+                crate::sound::ring(&self.settings.sound_name);
                 self.rang += 1;
                 self.last_ring = std::time::Instant::now();
             }

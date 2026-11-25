@@ -15,6 +15,7 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 sha2 = "0.11.1"
 tray-icon = "0.26.1"
+windows = { version = "0.62", features = ["Win32_Media_Audio", "Win32_System_Com", "Win32_Foundation", "Win32_System_Com_StructuredStorage", "Win32_System_Variant"] }
 windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Gdi", "Win32_System_Threading", "Win32_Media_Audio", "Win32_System_Registry", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_LibraryLoader", "Win32_Security", "Win32_UI_HiDpi", "Win32_Graphics_Dwm", "Win32_UI_Controls", "Win32_System_Diagnostics_ToolHelp"] }
 
 [profile.release]

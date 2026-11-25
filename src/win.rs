@@ -228,48 +228,37 @@ pub fn window_pos(hwnd: HWND) -> Option<(i32, i32)> {
     }
 }
 
-/// Reminder sounds: (setting key, label, file in C:\Windows\Media). "windows" is whatever the
-/// Windows sound scheme has for Calendar Reminder.
-pub const SOUNDS: [(&str, &str, &str); 6] = [
-    ("alarm", "Alarm", "Alarm01.wav"),
-    ("alarm2", "Alarm 2", "Alarm02.wav"),
-    ("ring", "Ring", "Ring01.wav"),
-    ("chimes", "Chimes", "chimes.wav"),
-    ("notify", "Notify", "Windows Notify System Generic.wav"),
-    ("windows", "Windows reminder", ""),
-];
-
-fn sound_file(name: &str) -> Option<std::path::PathBuf> {
-    let media = std::path::PathBuf::from(std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into())).join("Media");
-    if name == "windows" {
-        let v = reg_get_str(r"AppEvents\Schemes\Apps\.Default\Notification.Reminder\.Current", "")?;
-        let v = expand_env(&v);
-        return (!v.trim().is_empty()).then(|| std::path::PathBuf::from(v));
+/// Wait up to `wait` for a named mutex and hold it until the returned guard is dropped.
+pub struct MutexGuard(HANDLE);
+impl Drop for MutexGuard {
+    fn drop(&mut self) {
+        unsafe {
+            ReleaseMutex(self.0);
+            CloseHandle(self.0);
+        }
     }
-    let file = SOUNDS.iter().find(|s| s.0 == name).map(|s| s.2).unwrap_or("Alarm01.wav");
-    Some(media.join(file))
 }
 
-fn expand_env(s: &str) -> String {
-    let mut out = s.to_string();
-    for (k, v) in std::env::vars() {
-        out = out.replace(&format!("%{k}%"), &v).replace(&format!("%{}%", k.to_uppercase()), &v);
+pub fn wait_mutex(name: &str, wait: std::time::Duration) -> Option<MutexGuard> {
+    unsafe {
+        let h = CreateMutexW(std::ptr::null(), 0, wide(name).as_ptr());
+        if h.is_null() {
+            return None;
+        }
+        let r = WaitForSingleObject(h, wait.as_millis() as u32);
+        if r == WAIT_OBJECT_0 || r == WAIT_ABANDONED {
+            Some(MutexGuard(h))
+        } else {
+            CloseHandle(h);
+            None
+        }
     }
-    out
 }
 
-/// Plays a reminder sound (see [`SOUNDS`]) without waiting for it. Falls back to the Windows
-/// asterisk sound if the file is missing.
-pub fn play_sound(name: &str) {
+pub fn play_alias_sync(alias: &str) {
     use windows_sys::Win32::Media::Audio::*;
     unsafe {
-        let ok = match sound_file(name).filter(|p| p.exists()) {
-            Some(p) => PlaySoundW(wide(&p.to_string_lossy()).as_ptr(), std::ptr::null_mut(), SND_FILENAME | SND_ASYNC | SND_NODEFAULT),
-            None => 0,
-        };
-        if ok == 0 {
-            PlaySoundW(wide("SystemAsterisk").as_ptr(), std::ptr::null_mut(), SND_ALIAS | SND_ASYNC);
-        }
+        PlaySoundW(wide(alias).as_ptr(), std::ptr::null_mut(), SND_ALIAS | SND_SYNC);
     }
 }
 
