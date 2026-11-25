@@ -55,7 +55,7 @@ pub fn show(app: &mut MainApp, ui: &mut egui::Ui) {
                         let r = ui.available_rect_before_wrap();
                         ui.painter().hline(r.x_range().shrink(10.0), r.top(), Stroke::new(1.0, pal.border.gamma_multiply(0.6)));
                     }
-                    row(ui, &pal, m, &mut s, &mut app.new_cat);
+                    row(ui, &pal, m, &mut s, &mut app.new_cat, &mut app.ha);
                 }
             });
             ui.add_space(8.0);
@@ -97,10 +97,10 @@ pub fn show(app: &mut MainApp, ui: &mut egui::Ui) {
     }
 }
 
-fn row(ui: &mut egui::Ui, pal: &Pal, m: &crate::settings::Meta, s: &mut Settings, new_cat: &mut String) {
+fn row(ui: &mut egui::Ui, pal: &Pal, m: &crate::settings::Meta, s: &mut Settings, new_cat: &mut String, ha: &mut HaUi) {
     egui::Frame::new().inner_margin(Margin::symmetric(12, 10)).show(ui, |ui| {
         ui.set_width(ui.available_width());
-        let wide = matches!(m.key, "categories");
+        let wide = matches!(m.key, "categories" | "ha");
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
                 ui.set_max_width((ui.available_width() - 300.0).max(220.0));
@@ -108,12 +108,22 @@ fn row(ui: &mut egui::Ui, pal: &Pal, m: &crate::settings::Meta, s: &mut Settings
                 ui.label(RichText::new(m.help).size(12.0).color(pal.dim));
             });
             if !wide {
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| control(ui, pal, m.key, s));
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if m.key.starts_with("ha_") {
+                        ha_control(ui, pal, m.key, s, ha)
+                    } else {
+                        control(ui, pal, m.key, s)
+                    }
+                });
             }
         });
         if wide {
             ui.add_space(6.0);
-            categories(ui, pal, s, new_cat);
+            if m.key == "ha" {
+                ha_connect(ui, pal, s, ha);
+            } else {
+                categories(ui, pal, s, new_cat);
+            }
         }
     });
 }
@@ -331,3 +341,211 @@ fn categories(ui: &mut egui::Ui, pal: &Pal, s: &mut Settings, new_cat: &mut Stri
 }
 
 use std::str::FromStr;
+
+// ---------------------------------------------------------------- Home Assistant
+
+/// Settings-page state for the Home Assistant rows.
+#[derive(Default)]
+pub struct HaUi {
+    init: bool,
+    url: String,
+    token: String,
+    /// What Home Assistant has (printers, cameras), fetched in the background.
+    found: std::sync::Arc<std::sync::Mutex<Option<Result<crate::ha::Found, String>>>>,
+    looked: String,
+    status: crate::ha::Status,
+    status_at: Option<std::time::Instant>,
+    msg: String,
+}
+
+impl HaUi {
+    /// Look up printers and cameras once per address and token.
+    fn discover(&mut self, s: &Settings, ctx: &egui::Context) {
+        let key = format!("{}|{}", s.ha_url, s.ha_token);
+        if key == self.looked {
+            return;
+        }
+        self.looked = key;
+        let Some(conn) = crate::ha::Conn::from_settings(s) else {
+            *self.found.lock().unwrap() = None;
+            return;
+        };
+        let slot = self.found.clone();
+        let ctx = ctx.clone();
+        std::thread::spawn(move || {
+            let r = crate::ha::discover(&conn);
+            *slot.lock().unwrap() = Some(r);
+            ctx.request_repaint();
+        });
+    }
+    fn found(&self) -> Option<crate::ha::Found> {
+        self.found.lock().ok()?.as_ref()?.as_ref().ok().cloned()
+    }
+}
+
+fn ha_connect(ui: &mut egui::Ui, pal: &Pal, s: &mut Settings, ha: &mut HaUi) {
+    if !ha.init {
+        ha.init = true;
+        ha.url = s.ha_url.clone();
+    }
+    if ha.status_at.is_none_or(|t| t.elapsed().as_secs() >= 1) {
+        ha.status = crate::ha::load_status();
+        ha.status_at = Some(std::time::Instant::now());
+    }
+    ui.ctx().request_repaint_after(std::time::Duration::from_secs(1));
+    ha.discover(s, ui.ctx());
+    let saved = crate::secret::open(&s.ha_token).is_some();
+    egui::Grid::new("ha_grid").num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
+        ui.label(RichText::new("Address").color(pal.dim));
+        ui.add(egui::TextEdit::singleline(&mut ha.url).hint_text("https://homeassistant.example.com").desired_width(320.0));
+        ui.end_row();
+        ui.label(RichText::new("Token").color(pal.dim));
+        let hint = if saved { "Saved. Paste a new one to replace it." } else { "Paste a long-lived access token" };
+        ui.add(egui::TextEdit::singleline(&mut ha.token).password(true).hint_text(hint).desired_width(320.0));
+        ui.end_row();
+    });
+    ui.add_space(4.0);
+    ui.horizontal(|ui| {
+        let ok = crate::net::Url::parse(&ha.url).is_some() && (saved || !ha.token.trim().is_empty());
+        let label = if saved && ha.token.is_empty() && ha.url.trim().trim_end_matches('/') == s.ha_url { "Reconnect" } else { "Connect" };
+        if ui.add_enabled(ok, egui::Button::new(label)).clicked() {
+            s.ha_url = ha.url.trim().trim_end_matches('/').to_string();
+            if !ha.token.trim().is_empty() {
+                s.ha_token = crate::secret::seal(&ha.token);
+                ha.token.clear();
+            } else {
+                // same settings: touch the file so the helper reconnects
+                s.ha_token = crate::secret::seal(&crate::secret::open(&s.ha_token).unwrap_or_default());
+            }
+            ha.looked.clear();
+            ha.msg.clear();
+        }
+        if !saved
+            && let Some(p) = crate::secret::desk_dashboard_credential()
+            && ui.button("Use the desk dashboard's sign-in").on_hover_text(p.display().to_string()).clicked()
+        {
+            match crate::secret::read_clixml(&p) {
+                Some((url, token)) if crate::net::Url::parse(&url).is_some() && !token.is_empty() => {
+                    s.ha_url = url.trim_end_matches('/').to_string();
+                    s.ha_token = crate::secret::seal(&token);
+                    ha.url = s.ha_url.clone();
+                    ha.looked.clear();
+                    ha.msg.clear();
+                }
+                _ => ha.msg = "Couldn't read the desk dashboard's sign-in.".into(),
+            }
+        }
+        if saved && ui.button("Disconnect").on_hover_text("Forgets the token").clicked() {
+            s.ha_token.clear();
+            ha.looked.clear();
+        }
+    });
+    ui.add_space(4.0);
+    let st = &ha.status;
+    let (col, word) = match st.state.as_str() {
+        "connected" => (pal.green, "Connected"),
+        "connecting" => (pal.accent, "Connecting"),
+        "error" => (pal.red, "Can't connect"),
+        _ => (pal.faint, "Off"),
+    };
+    ui.horizontal_wrapped(|ui| {
+        ui.label(RichText::new("●").color(col));
+        let mut line = format!("{word}: {}", st.detail);
+        if st.state == "connected" && !st.printer.is_empty() && s.ha_print_alerts {
+            line += &format!(" · watching the {} printer", st.printer);
+            if !st.camera.is_empty() {
+                let cam = ha.found().and_then(|f| f.cameras.iter().find(|c| c.0 == st.camera).map(|c| c.1.clone())).unwrap_or_else(|| st.camera.clone());
+                line += &format!(", photo from {cam}");
+            }
+        }
+        ui.label(RichText::new(line).size(12.0).color(pal.dim));
+    });
+    if let Some(Err(e)) = ha.found.lock().ok().and_then(|f| f.clone()) {
+        ui.label(RichText::new(e).size(12.0).color(pal.red));
+    }
+    if !ha.msg.is_empty() {
+        ui.add(egui::Label::new(RichText::new(&ha.msg).size(12.0).color(pal.dim)).wrap());
+    }
+}
+
+fn ha_control(ui: &mut egui::Ui, pal: &Pal, key: &str, s: &mut Settings, ha: &mut HaUi) {
+    let found = ha.found();
+    match key {
+        "ha_print_alerts" => toggle(ui, pal, &mut s.ha_print_alerts),
+        "ha_notifications" => {
+            toggle(ui, pal, &mut s.ha_notifications);
+            let b = ui.add_enabled(!s.ha_url.is_empty(), egui::Button::new("Copy webhook setup"));
+            if b.on_hover_text("Copies a Home Assistant automation to paste in (Automations > Create > Edit in YAML)").clicked() {
+                let id = webhook_id();
+                ui.ctx().copy_text(webhook_yaml(&id));
+                ha.msg = format!(
+                    "Copied. In Home Assistant: Settings > Automations > Create automation > ⋮ > Edit in YAML, paste over everything, save.\nThen send a POST with JSON to {}/api/webhook/{id}\n    {{\"title\": \"Print done\", \"message\": \"Took 2h\", \"camera\": \"camera.printer\"}}   (\"image\": \"https://…\" works too)\nAnyone who has that address can send you alerts, so keep it private.",
+                    s.ha_url.trim_end_matches('/')
+                );
+            }
+        }
+        "ha_printer" => {
+            let label = if s.ha_printer.is_empty() {
+                "First one found".to_string()
+            } else {
+                found.as_ref().and_then(|f| f.printers.iter().find(|p| p.0 == s.ha_printer).map(|p| p.1.clone())).unwrap_or_else(|| s.ha_printer.clone())
+            };
+            egui::ComboBox::from_id_salt("ha_printer").selected_text(label).width(230.0).show_ui(ui, |ui| {
+                ui.selectable_value(&mut s.ha_printer, String::new(), "First one found");
+                for (id, name) in found.iter().flat_map(|f| f.printers.iter()) {
+                    ui.selectable_value(&mut s.ha_printer, id.clone(), format!("{name}  ({id})"));
+                }
+            });
+        }
+        "ha_camera" => {
+            let label = match s.ha_camera.as_str() {
+                "" => "The printer's own camera".to_string(),
+                "none" => "No photo".to_string(),
+                c => found.as_ref().and_then(|f| f.cameras.iter().find(|x| x.0 == c).map(|x| x.1.clone())).unwrap_or_else(|| c.to_string()),
+            };
+            egui::ComboBox::from_id_salt("ha_camera").selected_text(label).width(230.0).show_ui(ui, |ui| {
+                ui.selectable_value(&mut s.ha_camera, String::new(), "The printer's own camera");
+                ui.selectable_value(&mut s.ha_camera, "none".to_string(), "No photo");
+                for (id, name) in found.iter().flat_map(|f| f.cameras.iter()) {
+                    ui.selectable_value(&mut s.ha_camera, id.clone(), name.as_str());
+                }
+            });
+        }
+        _ => {}
+    }
+}
+
+/// A hard-to-guess webhook id: anyone who knows it can send alerts.
+fn webhook_id() -> String {
+    use std::hash::{BuildHasher, Hasher};
+    let mut out = String::from("sticky-");
+    for _ in 0..2 {
+        let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+        h.write_u128(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0));
+        out += &format!("{:016x}", h.finish());
+    }
+    out
+}
+
+fn webhook_yaml(id: &str) -> String {
+    let t = r#"alias: Sticky alert (webhook)
+description: >-
+  POST JSON to /api/webhook/WEBHOOK_ID to pop up an alert in Sticky:
+  {"title": "...", "message": "...", "camera": "camera.x"} or "image": "https://..."
+triggers:
+  - trigger: webhook
+    webhook_id: WEBHOOK_ID
+    allowed_methods: [POST, PUT]
+    local_only: false
+actions:
+  - action: persistent_notification.create
+    data:
+      notification_id: "sticky_{{ (now().timestamp() * 1000) | int }}"
+      title: "{{ trigger.json.title | default('Alert') }}"
+      message: >-
+        {{ trigger.json.message | default('') }}
+        {% if trigger.json.camera is defined %}![photo](/api/camera_proxy/{{ trigger.json.camera }}){% elif trigger.json.image is defined %}![photo]({{ trigger.json.image }}){% endif %}
+mode: queued
+"#;
+    t.replace("WEBHOOK_ID", id)
+}

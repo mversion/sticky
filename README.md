@@ -53,13 +53,36 @@ An optional always-on-top sticky note shows open items and what got done today.
 Reminder pop-ups stay on top with Done, Snooze and more snooze choices, and play a sound you pick in Settings > Reminders (Alarm by default, with a Test button, a loudness boost up to x8, music turned down while it plays, and an option to repeat it every minute until you respond). Reminders missed while the
 PC was off pop up when it's back.
 
+## Alerts from Home Assistant
+
+Settings > Home Assistant connects Sticky to your Home Assistant (its address plus a long-lived
+access token from your Home Assistant profile, Security tab; the token is stored encrypted with
+Windows DPAPI). The background helper keeps a websocket open and turns these into pop-ups:
+
+- **3D prints**: a printer from the Moonraker integration finishing, being cancelled or failing,
+  with a photo from its camera (the printer's own camera by default, or any camera you pick).
+  A print that ended while the PC was off pops up when Sticky reconnects (up to 12 hours later).
+- **Anything else**: a Home Assistant notification whose ID starts with `sticky` pops up and is
+  then cleared. A Markdown picture in the message, `![](/api/camera_proxy/camera.x)` or
+  `![](https://…)`, shows on the pop-up. **Copy webhook setup** copies a ready-made automation
+  with a webhook trigger, so any service can send an alert:
+
+  ```
+  POST https://<your home assistant>/api/webhook/sticky-<random>
+  {"title": "Print done", "message": "Took 2h", "camera": "camera.printer"}   ("image": "https://…" works too)
+  ```
+
+  Keep the webhook address private: anyone who has it can send you alerts.
+
+Locally, `sticky alert <text> [--detail <text>] [--picture <file>]` pops one up from a script.
+
 ## How it's built
 
 One small exe (about 6 MB) that runs in roles, so nothing heavy stays in memory:
 
 | Role | Memory | Runs |
 |---|---|---|
-| `daemon`: tray, hotkey, reminder clock, update check | about 2 MB private | always (HKCU Run key `Sticky`) |
+| `daemon`: tray, hotkey, reminder clock, update check, Home Assistant connection | about 2 MB private | always (HKCU Run key `Sticky`) |
 | `ui`: quick add and the main window | about 65 MB, mostly the GL driver | while open |
 | `popup`: a reminder | about 65 MB | until you act on it |
 | `note`: the desktop sticky note | about 65 MB | only if turned on |
@@ -77,6 +100,7 @@ sticky note                 the desktop note        sticky export           all 
 sticky kite [keyword]       add the Kite runner     sticky update           install the latest release
 sticky setup                installer window        sticky install          install without a window
 sticky uninstall [--quiet]  remove it               sticky version
+sticky alert <text> [--detail <text>] [--picture <file>]   pop up an alert now
 ```
 
 ### Developing
@@ -86,8 +110,12 @@ cargo test
 cargo build --release
 ```
 
-`STICKY_HOME=<folder>` runs against a test data folder. `tools\grab.ps1 -Title "Sticky" -Out x.png`
-screenshots a Sticky window.
+`STICKY_HOME=<folder>` runs against a test data folder, beside the real copy (it gets its own
+window locks). `tools\grab.ps1 -Title "Sticky" -Out x.png [-ProcessId n]` screenshots a Sticky
+window. `sticky ha-import` copies the desk dashboard's Home Assistant sign-in into the settings,
+`sticky ha-watch` runs only the Home Assistant connection, and `STICKY_FAKE_PRINT_END=1` makes it
+send a print alert as soon as it connects. `STICKY_SETTINGS_SEARCH=<words>` pre-fills the settings
+search (for screenshots).
 
 ### Releasing
 

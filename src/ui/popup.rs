@@ -21,6 +21,9 @@ struct Popup {
     repeats: bool,
     rang: u32,
     last_ring: std::time::Instant,
+    detail: String,
+    source: String,
+    picture: Option<(egui::TextureHandle, std::path::PathBuf)>,
 }
 
 const W: f32 = 400.0;
@@ -29,7 +32,7 @@ pub fn run(id: u64, slot: i32, was: i64) {
     let data = store::load();
     let Some(item) = data.get(id).cloned() else { return };
     let settings = Settings::load();
-    let was = Local.timestamp_opt(was, 0).single().or(item.due).unwrap_or_else(Local::now);
+    let was = (was > 0).then(|| Local.timestamp_opt(was, 0).single()).flatten().or(item.due).unwrap_or_else(Local::now);
     let vb = egui::ViewportBuilder::default()
         .with_title(format!("Sticky reminder {id}"))
         .with_inner_size(Vec2::new(W, 150.0))
@@ -49,7 +52,32 @@ pub fn run(id: u64, slot: i32, was: i64) {
                 win::style_window(h, Some(u32::from_le_bytes([pal.accent.r(), pal.accent.g(), pal.accent.b(), 0])));
                 place(h, &settings, slot, 150.0);
             }
-            Ok(Box::new(Popup { id, text: item.text.clone(), was, settings, pal, hwnd, frames: 0, snooze_open: false, last_h: 150.0, slot, repeats: item.repeat.is_some(), rang: 0, last_ring: std::time::Instant::now() }))
+            // the photo on an alert, decoded at twice the pop-up width for sharp high-DPI screens
+            let picture = item.picture.as_ref().and_then(|name| {
+                let path = crate::picture::path(name);
+                let bytes = std::fs::read(&path).ok()?;
+                let (w, h, px) = crate::picture::decode(&bytes, (W * 2.0) as u32)?;
+                let img = egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], &px);
+                Some((cc.egui_ctx.load_texture("picture", img, egui::TextureOptions::LINEAR), path))
+            });
+            Ok(Box::new(Popup {
+                id,
+                text: item.text.clone(),
+                was,
+                settings,
+                pal,
+                hwnd,
+                frames: 0,
+                snooze_open: false,
+                last_h: 150.0,
+                slot,
+                repeats: item.repeat.is_some(),
+                rang: 0,
+                last_ring: std::time::Instant::now(),
+                detail: item.detail.clone(),
+                source: item.source.clone(),
+                picture,
+            }))
         }),
     );
 }
@@ -107,7 +135,8 @@ impl eframe::App for Popup {
             ui.painter().rect_filled(egui::Rect::from_min_size(full.left_top(), Vec2::new(4.0, full.height())), CornerRadius::ZERO, pal.accent);
             ui.horizontal(|ui| {
                 ui.label(icon(ic::BELL, 15.0, pal.accent));
-                ui.label(RichText::new("REMINDER").size(11.0).color(pal.accent).strong());
+                let head = if self.source.is_empty() { "REMINDER".to_string() } else { self.source.to_uppercase() };
+                ui.label(RichText::new(head).size(11.0).color(pal.accent).strong());
                 let ago = (Local::now() - self.was).num_minutes();
                 let when = store::describe_due(self.was, false, self.settings.use_24h);
                 let txt = if ago >= 2 { format!("{when} · {ago} min ago") } else { when };
@@ -121,6 +150,20 @@ impl eframe::App for Popup {
             });
             ui.add_space(6.0);
             ui.add(egui::Label::new(RichText::new(&self.text).font(semi(18.0 * self.settings.font_scale)).color(pal.text)).wrap());
+            if !self.detail.is_empty() {
+                ui.add_space(2.0);
+                ui.add(egui::Label::new(RichText::new(&self.detail).size(13.0 * self.settings.font_scale).color(pal.dim)).wrap());
+            }
+            if let Some((tex, path)) = &self.picture {
+                ui.add_space(8.0);
+                let w = ui.available_width();
+                let sz = tex.size_vec2();
+                let h = (w * sz.y / sz.x).min(420.0);
+                let r = ui.add(egui::Image::new(tex).fit_to_exact_size(Vec2::new(h * sz.x / sz.y, h)).corner_radius(8).sense(egui::Sense::click()));
+                if r.on_hover_text("Open the picture").on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                    let _ = std::process::Command::new("explorer").arg(path).spawn();
+                }
+            }
             ui.add_space(10.0);
             ui.horizontal(|ui| {
                 let done = egui::Button::new(RichText::new(format!("{}  Done", ic::CHECK)).color(pal.on_accent)).fill(pal.accent).min_size(Vec2::new(96.0, 30.0));
@@ -161,7 +204,7 @@ impl eframe::App for Popup {
             }
             ui.cursor().top() - top
         });
-        let h = (r.inner.ceil() + 28.0).clamp(100.0, 600.0);
+        let h = (r.inner.ceil() + 28.0).clamp(100.0, 800.0);
         if (h - self.last_h).abs() > 1.0 {
             self.last_h = h;
             ctx.send_viewport_cmd(ViewportCommand::InnerSize(Vec2::new(W, h)));

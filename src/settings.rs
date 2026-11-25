@@ -51,6 +51,16 @@ pub struct Settings {
     // Updates
     pub check_updates: bool,
     pub auto_update: bool,
+    // Home Assistant
+    pub ha_url: String,
+    /// DPAPI-encrypted (see secret.rs)
+    pub ha_token: String,
+    pub ha_print_alerts: bool,
+    /// Print state sensor; empty picks the first printer found
+    pub ha_printer: String,
+    /// Camera for the photo; empty picks the printer's own, "none" for no photo
+    pub ha_camera: String,
+    pub ha_notifications: bool,
 }
 
 impl Default for Settings {
@@ -92,6 +102,12 @@ impl Default for Settings {
             main_size: [920.0, 640.0],
             check_updates: true,
             auto_update: true,
+            ha_url: String::new(),
+            ha_token: String::new(),
+            ha_print_alerts: true,
+            ha_printer: String::new(),
+            ha_camera: String::new(),
+            ha_notifications: true,
         }
     }
 }
@@ -132,7 +148,7 @@ pub struct Meta {
     pub keywords: &'static str,
 }
 
-pub const SECTIONS: [&str; 7] = ["General", "Appearance", "Tasks", "Reminders", "Sticky note", "Updates", "Data"];
+pub const SECTIONS: [&str; 8] = ["General", "Appearance", "Tasks", "Reminders", "Home Assistant", "Sticky note", "Updates", "Data"];
 
 pub const META: &[Meta] = &[
     Meta { key: "hotkey", section: "General", label: "Quick-add hotkey", help: "Opens the quick-add box from anywhere. Example: Ctrl+Alt+N, Win+Shift+Space.", keywords: "shortcut keyboard key global launch open" },
@@ -160,6 +176,11 @@ pub const META: &[Meta] = &[
     Meta { key: "sound_repeat", section: "Reminders", label: "Repeat the sound until I respond", help: "Plays again every minute (up to 10 times) while the pop-up is open.", keywords: "audio alarm ring again nag loud" },
     Meta { key: "popup_corner", section: "Reminders", label: "Pop-up position", help: "Where reminder pop-ups appear.", keywords: "corner location place screen" },
     Meta { key: "popup_monitor", section: "Reminders", label: "Pop-up screen", help: "The main screen, a particular screen, or whichever screen the mouse is on.", keywords: "monitor display" },
+    Meta { key: "ha", section: "Home Assistant", label: "Connect to Home Assistant", help: "Alerts from home pop up here. Use your Home Assistant address and a long-lived access token (your profile in Home Assistant, Security tab). The token is kept encrypted for this Windows account.", keywords: "home assistant hass webhook relay alert notification external integration token mversion smart home" },
+    Meta { key: "ha_print_alerts", section: "Home Assistant", label: "3D print alerts", help: "Pops up when a print finishes, is cancelled or fails, with a photo from the printer's camera. A print that ended while the PC was off pops up later (up to 12 hours).", keywords: "printer 3d print snapmaker u1 moonraker klipper finished done camera photo" },
+    Meta { key: "ha_printer", section: "Home Assistant", label: "Printer", help: "Printers come from Home Assistant's Moonraker integration.", keywords: "3d printer u1 snapmaker moonraker" },
+    Meta { key: "ha_camera", section: "Home Assistant", label: "Photo from", help: "The camera that takes the picture on a print alert.", keywords: "camera photo picture snapshot image" },
+    Meta { key: "ha_notifications", section: "Home Assistant", label: "Alerts from automations and webhooks", help: "A Home Assistant notification whose ID starts with \"sticky\" pops up here and is then cleared. A picture in it, ![](address), comes too. Copy webhook setup copies a ready-made automation.", keywords: "webhook automation notification relay external services ifttt api url persistent" },
     Meta { key: "note_window", section: "Sticky note", label: "Show the sticky note on the desktop", help: "A small always-there note with your open and done items. The desk dashboard has its own Sticky tile too.", keywords: "pin desktop widget permanent window dashboard" },
     Meta { key: "note_on_top", section: "Sticky note", label: "Keep the sticky note on top", help: "Stays above other windows.", keywords: "always top float pin" },
     Meta { key: "note_show_done", section: "Sticky note", label: "Show done items on the note", help: "Lists items finished today, crossed out.", keywords: "completed finished" },

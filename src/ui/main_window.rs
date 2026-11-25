@@ -57,6 +57,7 @@ pub struct MainApp {
     confirm: Option<u64>,
     pub(super) set_search: String,
     pub(super) new_cat: String,
+    pub(super) ha: super::settings_view::HaUi,
     frames: u32,
     ctx: egui::Context,
 }
@@ -119,8 +120,9 @@ pub fn run(mode: &str) {
                 last_height: 0.0,
                 flash: None,
                 confirm: None,
-                set_search: String::new(),
+                set_search: std::env::var("STICKY_SETTINGS_SEARCH").unwrap_or_default(), // for screenshots
                 new_cat: String::new(),
+                ha: Default::default(),
                 frames: 0,
                 ctx: cc.egui_ctx.clone(),
             }))

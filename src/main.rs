@@ -9,6 +9,7 @@
 //!   sticky popup <id> <slot> <t> a reminder pop-up (started by the helper)
 //!   sticky done|undo <id>        tick or untick an item (the desk dashboard uses this)
 //!   sticky kite [keyword]        add the Kite runner command
+//!   sticky alert <text> [--detail <text>] [--picture <file>]   pop up an alert now (for scripts)
 //!   sticky export                print all items as JSON (for scripts)
 //!   sticky update [--auto]       install the latest GitHub release if it's newer
 //!   sticky setup                 the installer window (also what sticky-setup.exe shows)
@@ -16,10 +17,14 @@
 //!   sticky uninstall [--quiet]   remove it (Settings > Apps runs this)
 
 mod daemon;
+mod ha;
 mod icon;
 mod kite;
+mod net;
 mod parse;
+mod picture;
 mod repeat;
+mod secret;
 mod settings;
 mod setup;
 mod sound;
@@ -68,6 +73,23 @@ fn main() {
         "settings" => daemon::open_ui("settings"),
         "log" => daemon::open_ui("log"),
         "daemon" => daemon::run(),
+        "alert" => alert(&args[1..]),
+        // for trying things out: run only the Home Assistant connection, in the foreground
+        "ha-watch" => {
+            ha::start();
+            loop {
+                std::thread::sleep(std::time::Duration::from_secs(3600));
+            }
+        }
+        // same as Settings > "Use the desk dashboard's sign-in"
+        "ha-import" => {
+            if let Some((url, token)) = secret::desk_dashboard_credential().and_then(|p| secret::read_clixml(&p)) {
+                let mut s = Settings::load();
+                s.ha_url = url.trim_end_matches('/').to_string();
+                s.ha_token = secret::seal(&token);
+                s.save();
+            }
+        }
         "ring" => sound::run(args.get(1).map(String::as_str).unwrap_or("alarm")),
         "note" => ui::note::run(),
         "popup" => {
@@ -127,4 +149,25 @@ fn add(text: &str) {
     let id = store::update(|d| d.add(item));
     store::log("added", id, &title);
     ui::toast::run(title, detail.join(" · "));
+}
+
+/// `sticky alert Print done --detail "Took 2h" --picture C:\shot.jpg`
+fn alert(args: &[String]) {
+    let (mut text, mut detail, mut pic) = (vec![], String::new(), None);
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--detail" => detail = it.next().cloned().unwrap_or_default(),
+            "--picture" => pic = it.next().cloned(),
+            _ => text.push(a.clone()),
+        }
+    }
+    let text = text.join(" ");
+    if text.trim().is_empty() {
+        eprintln!("usage: sticky alert <text> [--detail <text>] [--picture <file>]");
+        return;
+    }
+    daemon::ensure_running();
+    let picture = pic.and_then(|p| std::fs::read(p).ok()).and_then(|b| picture::save(&b));
+    ha::add_alert(&text, &detail, "Alert", picture);
 }

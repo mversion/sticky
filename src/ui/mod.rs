@@ -503,6 +503,9 @@ pub fn item_from(p: &crate::parse::Parsed, s: &Settings, fallback_cat: Option<&s
         tags: p.tags.clone(),
         pinned: false,
         order: 0,
+        detail: String::new(),
+        source: String::new(),
+        picture: None,
     }
 }
 

@@ -20,10 +20,24 @@ pub const DAEMON_MUTEX: &str = "Local\\Sticky.Daemon";
 pub const UI_MUTEX: &str = "Local\\Sticky.Ui";
 pub const NOTE_MUTEX: &str = "Local\\Sticky.Note";
 
+/// The lock name, kept apart per data folder when `STICKY_HOME` points somewhere else, so a test
+/// copy can run beside the real one.
+fn lock_name(name: &str) -> String {
+    match std::env::var("STICKY_HOME") {
+        Ok(h) if !h.is_empty() => {
+            use std::hash::{Hash, Hasher};
+            let mut x = std::collections::hash_map::DefaultHasher::new();
+            h.to_lowercase().hash(&mut x);
+            format!("{name}.{:x}", x.finish())
+        }
+        _ => name.to_string(),
+    }
+}
+
 /// Hold a named mutex for the life of the process. False if another process holds it.
 pub fn claim(name: &str) -> bool {
     unsafe {
-        let h = CreateMutexW(std::ptr::null(), 1, wide(name).as_ptr());
+        let h = CreateMutexW(std::ptr::null(), 1, wide(&lock_name(name)).as_ptr());
         if h.is_null() {
             return true;
         }
@@ -38,7 +52,7 @@ pub fn claim(name: &str) -> bool {
 
 pub fn exists(name: &str) -> bool {
     unsafe {
-        let h = OpenMutexW(0x0010_0000, 0, wide(name).as_ptr());
+        let h = OpenMutexW(0x0010_0000, 0, wide(&lock_name(name)).as_ptr());
         if h.is_null() {
             false
         } else {

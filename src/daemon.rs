@@ -131,6 +131,11 @@ pub fn run() {
         st.note = win::spawn_self(&["note"]);
     }
     store::log("helper started", 0, "");
+    crate::ha::start();
+    {
+        let keep: Vec<String> = store::load().items.iter().filter(|i| !i.done).filter_map(|i| i.picture.clone()).collect();
+        crate::picture::prune(30, &keep);
+    }
 
     // Events arrive on this thread inside DispatchMessage; queue them and wake the loop at once,
     // so the hotkey doesn't wait for the next timer tick.

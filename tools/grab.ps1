@@ -1,5 +1,5 @@
 # Renders a visible top-level window of a process to PNG with PrintWindow (works across monitors/DPI).
-param([string]$Process = 'sticky', [string]$Title, [string]$Out)
+param([string]$Process = 'sticky', [string]$Title, [string]$Out, [int]$ProcessId = 0)
 Add-Type -AssemblyName System.Drawing
 Add-Type -TypeDefinition @'
 using System; using System.Text; using System.Runtime.InteropServices;
@@ -18,7 +18,8 @@ public static class Grab {
 '@
 [Grab]::SetThreadDpiAwarenessContext([IntPtr]-4) | Out-Null  # per-monitor v2
 $h = [IntPtr]::Zero
-foreach ($p in Get-Process $Process) { $h = [Grab]::Find([uint32]$p.Id, $Title); if ($h -ne [IntPtr]::Zero) { break } }
+$procs = if ($ProcessId) { Get-Process -Id $ProcessId } else { Get-Process $Process }
+foreach ($p in $procs) { $h = [Grab]::Find([uint32]$p.Id, $Title); if ($h -ne [IntPtr]::Zero) { break } }
 if ($h -eq [IntPtr]::Zero) { throw "window '$Title' not found" }
 $r = New-Object Grab+RECT; [Grab]::GetWindowRect($h, [ref]$r) | Out-Null
 $bmp = New-Object System.Drawing.Bitmap ($r.R - $r.L), ($r.B - $r.T)

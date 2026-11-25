@@ -104,6 +104,15 @@ pub struct Item {
     /// Manual order inside a category (lower first).
     #[serde(default)]
     pub order: i64,
+    /// A second line, for alerts ("Took 11h 56m").
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub detail: String,
+    /// Where an alert came from ("3D printer", "Home Assistant"); empty for your own items.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub source: String,
+    /// A picture file in `.sticky\pictures`, shown on the pop-up.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub picture: Option<String>,
 }
 
 impl Item {
