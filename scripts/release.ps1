@@ -8,8 +8,10 @@ Set-Location (Split-Path $PSScriptRoot)
 
 if (git status --porcelain) { throw 'Commit or stash your changes first.' }
 $toml = Get-Content Cargo.toml -Raw
-$toml = [regex]::Replace($toml, '(?m)^version = ".*"$', "version = `"$Version`"", 1)
+# no $ anchor: with CRLF line endings it never matches and the version silently stays put
+$toml = [regex]::Replace($toml, '(?m)^version = "[^"]*"', "version = `"$Version`"", 1)
 Set-Content Cargo.toml $toml -NoNewline
+if ((Select-String -Path Cargo.toml -Pattern "^version = `"$([regex]::Escape($Version))`"" -Quiet) -ne $true) { throw 'Could not set the version in Cargo.toml.' }
 
 cargo test
 if ($LASTEXITCODE) { git checkout Cargo.toml; throw 'Tests failed.' }
