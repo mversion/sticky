@@ -213,6 +213,23 @@ pub fn add_alert_with(text: &str, detail: &str, source: &str, picture: Option<St
     id
 }
 
+/// From a state history (oldest first): the last change from printing or paused to an end state.
+fn print_end_in_history(list: &[Value]) -> Option<(String, f64)> {
+    let mut busy = false;
+    let mut end = None;
+    for x in list {
+        let s = x["state"].as_str().unwrap_or("");
+        if BUSY_STATES.contains(&s) {
+            busy = true;
+            end = None;
+        } else if busy && end.is_none() && DONE_STATES.contains(&s) {
+            let at = x["last_changed"].as_str().and_then(|t| DateTime::parse_from_rfc3339(t).ok()).map(|t| t.timestamp() as f64);
+            end = at.map(|t| (s.to_string(), t));
+        }
+    }
+    end
+}
+
 fn tidy_file_name(f: &str) -> String {
     let base = f.rsplit(['/', '\\']).next().unwrap_or(f);
     let base = base.strip_suffix(".gcode").or_else(|| base.strip_suffix(".3mf")).unwrap_or(base);
@@ -492,14 +509,33 @@ impl Session<'_> {
         save_status(&st);
         let ids = vec![p.state_id.clone(), p.file_id.clone(), p.duration_id.clone()];
         self.printer = Some(p);
+        // last_changed alone isn't proof: a Home Assistant restart resets it on every entity, so a
+        // print that finished hours ago looks like it just ended. Only a print that was actually
+        // running since the last alert counts, going by Home Assistant's history.
         if !first_run && DONE_STATES.contains(&state.as_str()) && ended > st.last_print_end + 1.0 && Local::now().timestamp() as f64 - ended < 12.0 * 3600.0 {
-            self.print_ended(&state, ended, true);
+            match self.missed_print_end(&ids[0], st.last_print_end) {
+                Ok(Some((how, at))) => self.print_ended(&how, at, true),
+                Ok(None) => {}
+                Err(e) => store::log("home assistant", 0, &format!("print history: {e}")),
+            }
         }
         if std::env::var_os("STICKY_FAKE_PRINT_END").is_some() {
             // try the alert without waiting for a real print to end
             self.print_ended("complete", Local::now().timestamp() as f64, false);
         }
         ids
+    }
+
+    /// The last print that ended since `since` (from Home Assistant's history): the state it ended
+    /// in and when. None when nothing was printing in between, e.g. Home Assistant just restarted.
+    fn missed_print_end(&self, id: &str, since: f64) -> Result<Option<(String, f64)>, String> {
+        let now = Local::now().timestamp() as f64;
+        let iso = |t: f64| DateTime::from_timestamp(t as i64, 0).map(|d| d.format("%Y-%m-%dT%H:%M:%S%%2B00:00").to_string()).unwrap_or_default();
+        let from = since.max(now - 12.0 * 3600.0);
+        let path = format!("/api/history/period/{}?filter_entity_id={id}&end_time={}&minimal_response&no_attributes", iso(from), iso(now + 60.0));
+        let body = net::get(&self.conn.url, &path, Some(&self.conn.token))?;
+        let v: Value = serde_json::from_slice(&body).map_err(|e| e.to_string())?;
+        Ok(print_end_in_history(v.get(0).and_then(|x| x.as_array()).map(|a| a.as_slice()).unwrap_or(&[])))
     }
 
     fn setup_doorbell(&mut self, list: &[Value], cameras: &[String], s: &Settings) -> Vec<String> {
@@ -662,6 +698,19 @@ impl Session<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn missed_print_needs_a_real_print() {
+        let h = |v: &[(&str, &str)]| v.iter().map(|(s, t)| json!({"state": s, "last_changed": t})).collect::<Vec<_>>();
+        // Home Assistant restarted: complete, unavailable, complete again. Nothing printed.
+        assert_eq!(print_end_in_history(&h(&[("complete", "2026-11-27T02:24:50+11:00"), ("unavailable", "2026-11-27T09:01:30+11:00"), ("complete", "2026-11-27T09:02:36+11:00")])), None);
+        // printed while the PC was off: the end time is when it stopped printing
+        let got = print_end_in_history(&h(&[("standby", "2026-11-27T01:00:00+11:00"), ("printing", "2026-11-27T02:00:00+11:00"), ("cancelled", "2026-11-27T03:00:00+11:00"), ("unavailable", "2026-11-27T09:01:30+11:00"), ("cancelled", "2026-11-27T09:02:36+11:00")]));
+        assert_eq!(got.as_ref().map(|g| g.0.as_str()), Some("cancelled"));
+        assert_eq!(got.map(|g| g.1 as i64), Some(DateTime::parse_from_rfc3339("2026-11-27T03:00:00+11:00").unwrap().timestamp()));
+        // still printing: nothing yet
+        assert_eq!(print_end_in_history(&h(&[("complete", "2026-11-27T01:00:00+11:00"), ("printing", "2026-11-27T02:00:00+11:00")])), None);
+    }
+
     #[test]
     fn doorbell_bits() {
         assert_eq!(doorbell_name("Driveway Visitor"), "Driveway");
