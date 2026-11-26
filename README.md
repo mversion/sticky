@@ -65,6 +65,9 @@ Windows DPAPI). The background helper keeps a websocket open and turns these int
 - **3D prints**: a printer from the Moonraker integration finishing, being cancelled or failing,
   with a photo from its camera (the printer's own camera by default, or any camera you pick).
   A print that ended while the PC was off pops up when Sticky reconnects (up to 12 hours later).
+- **Doorbell**: when someone presses the doorbell (a Reolink, or any doorbell with a
+  `binary_sensor.*_visitor`), Sticky plays a ding-dong and pops up with the doorbell's camera
+  shown live (about three pictures a second) for 3 minutes; click the picture to watch again.
 - **Anything else**: a Home Assistant notification whose ID starts with `sticky` pops up and is
   then cleared. A Markdown picture in the message, `![](/api/camera_proxy/camera.x)` or
   `![](https://…)`, shows on the pop-up. **Copy webhook setup** copies a ready-made automation
