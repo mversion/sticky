@@ -367,6 +367,17 @@ pub fn dismiss(id: u64) {
     });
 }
 
+/// Close an alert: it goes from the list altogether rather than counting as a finished task.
+pub fn close_alert(id: u64) {
+    let t = update(|d| {
+        let pos = d.items.iter().position(|i| i.id == id)?;
+        Some(d.items.remove(pos).text)
+    });
+    if let Some(t) = t {
+        log("closed alert", id, &t);
+    }
+}
+
 pub fn delete(id: u64) {
     let t = update(|d| {
         let pos = d.items.iter().position(|i| i.id == id)?;

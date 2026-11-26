@@ -17,7 +17,6 @@ struct Popup {
     frames: u32,
     snooze_open: bool,
     last_h: f32,
-    slot: i32,
     repeats: bool,
     rang: u32,
     last_ring: std::time::Instant,
@@ -33,13 +32,16 @@ struct Popup {
     live_rx: Option<std::sync::mpsc::Receiver<(u32, u32, Vec<u8>)>>,
     live_until: Option<std::time::Instant>,
     live_auto: bool,
+    /// Set once you drag the pop-up: it leaves the stack and stays where you put it
+    dragged: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 const W: f32 = 400.0;
 /// How long the doorbell picture stays live after it pops up, or after a click
 const LIVE_FOR: std::time::Duration = std::time::Duration::from_secs(180);
 
-pub fn run(id: u64, slot: i32, was: i64) {
+/// `_slot` is no longer used: the stack is worked out from the pop-ups on screen.
+pub fn run(id: u64, _slot: i32, was: i64) {
     let data = store::load();
     let Some(item) = data.get(id).cloned() else { return };
     let settings = Settings::load();
@@ -60,9 +62,13 @@ pub fn run(id: u64, slot: i32, was: i64) {
             let pal = palette(&settings);
             apply_style(&cc.egui_ctx, &pal, &settings);
             let hwnd = win::hwnd_from(cc);
+            let dragged = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
             if let Some(h) = hwnd {
                 win::style_window(h, Some(u32::from_le_bytes([pal.accent.r(), pal.accent.g(), pal.accent.b(), 0])));
-                place(h, &settings, slot, 150.0);
+                // newest on the outside: the order is when it popped up
+                let order = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as isize).unwrap_or(1).max(1);
+                win::mark_popup(h, order);
+                keep_in_stack(h, &settings, cc.egui_ctx.clone(), dragged.clone());
             }
             // the photo on an alert, decoded at twice the pop-up width for sharp high-DPI screens
             let picture = item.picture.as_ref().and_then(|name| {
@@ -82,7 +88,6 @@ pub fn run(id: u64, slot: i32, was: i64) {
                 frames: 0,
                 snooze_open: false,
                 last_h: 150.0,
-                slot,
                 repeats: item.repeat.is_some(),
                 rang: 0,
                 last_ring: std::time::Instant::now(),
@@ -97,23 +102,81 @@ pub fn run(id: u64, slot: i32, was: i64) {
                 live_until: None,
                 // live straight away only for a fresh alert, not one snoozed or shown late
                 live_auto: !item.live.is_empty() && (Local::now() - item.created).num_minutes() < 10,
+                dragged,
             }))
         }),
     );
 }
 
-fn place(h: windows_sys::Win32::Foundation::HWND, s: &Settings, slot: i32, height: f32) {
-    let a = win::screen_area(&s.popup_monitor);
+/// Where this pop-up belongs: stacked after every older pop-up on screen, starting at the
+/// corner from settings, and in a new column when one fills the screen.
+fn stack_spot(me: windows_sys::Win32::Foundation::HWND, a: &win::Area, corner: &str) -> Option<(i32, i32)> {
+    let stack = win::popup_stack();
     let w = (W * a.scale) as i32;
-    let hh = (height * a.scale) as i32;
     let gap = (14.0 * a.scale) as i32;
-    let step = hh + gap;
-    let (x, y) = match s.popup_corner.as_str() {
-        "center" => (a.left + (a.right - a.left - w) / 2, a.top + (a.bottom - a.top - hh) / 3 + slot * step),
-        "top-right" => (a.right - w - gap, a.top + gap + slot * step),
-        _ => (a.right - w - gap, a.bottom - hh - gap - slot * step),
-    };
-    win::move_window(h, x, y);
+    let room = a.bottom - a.top - 2 * gap;
+    let (mut col, mut used) = (0, 0);
+    for (_, h, height) in stack {
+        if used > 0 && used + height > room {
+            col += 1;
+            used = 0;
+        }
+        if h == me {
+            let x = match corner {
+                "center" => a.left + (a.right - a.left - w) / 2 - col * (w + gap),
+                _ => a.right - w - gap - col * (w + gap),
+            };
+            let y = match corner {
+                "center" => a.top + (a.bottom - a.top) / 5 + used,
+                "top-right" => a.top + gap + used,
+                _ => a.bottom - gap - used - height,
+            };
+            return Some((x, y));
+        }
+        used += height + gap;
+    }
+    None
+}
+
+/// Keep the pop-up in its place in the stack: when one below it closes it slides down (or up,
+/// for the top corner) into the gap. Runs until the pop-up closes or you drag it somewhere.
+fn keep_in_stack(h: windows_sys::Win32::Foundation::HWND, s: &Settings, ctx: egui::Context, dragged: std::sync::Arc<std::sync::atomic::AtomicBool>) {
+    use std::sync::atomic::Ordering;
+    // the screen is picked once, so "where the mouse is" doesn't follow the mouse around
+    let a = win::screen_area(&s.popup_monitor);
+    let corner = s.popup_corner.clone();
+    if let Some((x, y)) = stack_spot(h, &a, &corner) {
+        win::move_window(h, x, y);
+    }
+    let hw = h as usize;
+    std::thread::spawn(move || {
+        let h = hw as windows_sys::Win32::Foundation::HWND;
+        let mut last_height = win::window_height(h).unwrap_or(0);
+        while win::is_window(h) && !dragged.load(Ordering::Relaxed) {
+            let height = win::window_height(h).unwrap_or(0);
+            let (Some(to), Some(at)) = (stack_spot(h, &a, &corner), win::window_pos(h)) else {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+                continue;
+            };
+            if to == at {
+                last_height = height;
+                std::thread::sleep(std::time::Duration::from_millis(120));
+                continue;
+            }
+            if height != last_height || (to.0 - at.0).abs() > 4 {
+                // it changed size, or moved to another column: jump, don't slide
+                last_height = height;
+                win::move_window(h, to.0, to.1);
+                continue;
+            }
+            // slide: a quarter of the way each frame, at least a pixel
+            let dy = to.1 - at.1;
+            let step = if dy.abs() <= 2 { dy } else { dy / 4 + dy.signum() };
+            win::move_window(h, to.0, at.1 + step);
+            std::thread::sleep(std::time::Duration::from_millis(12));
+        }
+        ctx.request_repaint();
+    });
 }
 
 impl Popup {
@@ -165,6 +228,11 @@ impl eframe::App for Popup {
         // Drag to move. Added first so the buttons drawn later get the clicks.
         let bg = ui.interact(ctx.content_rect(), egui::Id::unique("drag"), egui::Sense::drag());
         if bg.drag_started() {
+            // moved by hand: it leaves the stack and the others close up behind it
+            self.dragged.store(true, std::sync::atomic::Ordering::Relaxed);
+            if let Some(h) = self.hwnd {
+                win::mark_popup(h, 0);
+            }
             ctx.send_viewport_cmd(ViewportCommand::StartDrag);
         }
         self.frames += 1;
@@ -206,6 +274,8 @@ impl eframe::App for Popup {
         }
         let pal = self.pal;
         let mut close = false;
+        // an alert (printer, doorbell, Home Assistant) isn't a task: it closes, it isn't ticked off
+        let alert = !self.source.is_empty();
         let r = egui::CentralPanel::default().frame(egui::Frame::new().fill(pal.panel).inner_margin(Margin { left: 18, right: 14, top: 14, bottom: 14 })).show(ui, |ui| {
             let top = ui.cursor().top();
             // accent bar
@@ -220,8 +290,13 @@ impl eframe::App for Popup {
                 let txt = if ago >= 2 { format!("{when} · {ago} min ago") } else { when };
                 ui.label(RichText::new(txt).size(12.0).color(pal.faint));
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if ui.add(egui::Button::new(icon(ic::CLOSE, 10.0, pal.dim)).frame(false)).on_hover_text("Dismiss").clicked() {
-                        store::dismiss(self.id);
+                    let tip = if alert { "Close" } else { "Dismiss" };
+                    if ui.add(egui::Button::new(icon(ic::CLOSE, 10.0, pal.dim)).frame(false)).on_hover_text(tip).clicked() {
+                        if alert {
+                            store::close_alert(self.id);
+                        } else {
+                            store::dismiss(self.id);
+                        }
                         close = true;
                     }
                 });
@@ -293,9 +368,12 @@ impl eframe::App for Popup {
             }
             ui.add_space(10.0);
             ui.horizontal(|ui| {
-                let done = egui::Button::new(RichText::new(format!("{}  Done", ic::CHECK)).color(pal.on_accent)).fill(pal.accent).min_size(Vec2::new(96.0, 30.0));
+                let label = if alert { format!("{}  Close", ic::CLOSE) } else { format!("{}  Done", ic::CHECK) };
+                let done = egui::Button::new(RichText::new(label).color(pal.on_accent)).fill(pal.accent).min_size(Vec2::new(96.0, 30.0));
                 if ui.add(done).clicked() {
-                    if self.repeats {
+                    if alert {
+                        store::close_alert(self.id);
+                    } else if self.repeats {
                         // the helper already moved it to the next occurrence
                         store::log("done (repeats)", self.id, &self.text);
                     } else {
@@ -303,13 +381,16 @@ impl eframe::App for Popup {
                     }
                     close = true;
                 }
-                let sn = self.settings.snooze_minutes;
-                if ui.add(egui::Button::new(format!("{}  Snooze {sn} min", ic::SNOOZE)).min_size(Vec2::new(0.0, 30.0))).clicked() {
-                    store::snooze(self.id, sn as i64);
-                    close = true;
-                }
-                if ui.add(egui::Button::new("…").min_size(Vec2::new(30.0, 30.0))).on_hover_text("More snooze options").clicked() {
-                    self.snooze_open = !self.snooze_open;
+                // nothing to snooze about someone at the door
+                if self.live.is_empty() {
+                    let sn = self.settings.snooze_minutes;
+                    if ui.add(egui::Button::new(format!("{}  Snooze {sn} min", ic::SNOOZE)).min_size(Vec2::new(0.0, 30.0))).clicked() {
+                        store::snooze(self.id, sn as i64);
+                        close = true;
+                    }
+                    if ui.add(egui::Button::new("…").min_size(Vec2::new(30.0, 30.0))).on_hover_text("More snooze options").clicked() {
+                        self.snooze_open = !self.snooze_open;
+                    }
                 }
             });
             if self.snooze_open {
@@ -334,10 +415,8 @@ impl eframe::App for Popup {
         let h = (r.inner.ceil() + 28.0).clamp(100.0, 800.0);
         if (h - self.last_h).abs() > 1.0 {
             self.last_h = h;
+            // the stack keeper moves it to fit its new height
             ctx.send_viewport_cmd(ViewportCommand::InnerSize(Vec2::new(W, h)));
-            if let Some(hw) = self.hwnd {
-                place(hw, &self.settings, self.slot, h);
-            }
         }
         if close {
             ctx.send_viewport_cmd(ViewportCommand::Close);

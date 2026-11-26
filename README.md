@@ -82,6 +82,10 @@ Windows DPAPI). The background helper keeps a websocket open and turns these int
 
 Locally, `sticky alert <text> [--detail <text>] [--picture <file>]` pops one up from a script.
 
+An alert isn't a task: **Close** (or ticking it in the list) removes it rather than counting it as
+done. Pop-ups stack in the corner from Settings, oldest nearest the corner; when one closes the
+others slide along to fill the gap. Drag one away and it stays where you put it.
+
 ## How it's built
 
 One small exe (about 6 MB) that runs in roles, so nothing heavy stays in memory:

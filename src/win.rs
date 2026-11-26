@@ -235,6 +235,57 @@ pub fn move_window(hwnd: HWND, x: i32, y: i32) {
     }
 }
 
+/// The window property that marks a pop-up in the stack; its value orders the stack (oldest first).
+const POPUP_PROP: &str = "Sticky.PopupOrder";
+
+/// Put a pop-up in the shared stack, or take it out (`order` 0), e.g. once you drag it away.
+pub fn mark_popup(hwnd: HWND, order: isize) {
+    let name = wide(POPUP_PROP);
+    unsafe {
+        if order == 0 {
+            RemovePropW(hwnd, name.as_ptr());
+        } else {
+            SetPropW(hwnd, name.as_ptr(), order as HANDLE);
+        }
+    }
+}
+
+/// Every pop-up in the stack, from any Sticky process: (order, window, height in pixels),
+/// oldest first.
+pub fn popup_stack() -> Vec<(isize, HWND, i32)> {
+    unsafe extern "system" fn each(h: HWND, data: LPARAM) -> windows_sys::core::BOOL {
+        unsafe {
+            let out = &mut *(data as *mut Vec<(isize, HWND, i32)>);
+            let name = wide(POPUP_PROP);
+            let order = GetPropW(h, name.as_ptr()) as isize;
+            if order != 0 && IsWindowVisible(h) != 0 {
+                let mut r: RECT = std::mem::zeroed();
+                if GetWindowRect(h, &mut r) != 0 {
+                    out.push((order, h, r.bottom - r.top));
+                }
+            }
+            1
+        }
+    }
+    let mut v: Vec<(isize, HWND, i32)> = Vec::new();
+    unsafe {
+        EnumWindows(Some(each), &mut v as *mut _ as LPARAM);
+    }
+    v.sort_by_key(|p| (p.0, p.1 as usize));
+    v
+}
+
+pub fn is_window(hwnd: HWND) -> bool {
+    unsafe { IsWindow(hwnd) != 0 }
+}
+
+pub fn window_height(hwnd: HWND) -> Option<i32> {
+    unsafe {
+        let mut r: RECT = std::mem::zeroed();
+        (GetWindowRect(hwnd, &mut r) != 0).then_some(r.bottom - r.top)
+    }
+}
+
 pub fn window_pos(hwnd: HWND) -> Option<(i32, i32)> {
     unsafe {
         let mut r: RECT = std::mem::zeroed();

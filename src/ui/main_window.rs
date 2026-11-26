@@ -218,7 +218,15 @@ impl MainApp {
         match a {
             RowAct::Toggle => {
                 let done = self.data.get(id).map(|i| !i.done).unwrap_or(true);
-                store::set_done(id, done);
+                // ticking an open alert closes it, the same as Close on its pop-up
+                if done && self.data.get(id).is_some_and(|i| !i.source.is_empty()) {
+                    store::close_alert(id);
+                    if self.editor.as_ref().is_some_and(|e| e.id == id) {
+                        self.editor = None;
+                    }
+                } else {
+                    store::set_done(id, done);
+                }
             }
             RowAct::Delete => {
                 if self.settings.confirm_delete && self.confirm != Some(id) {
