@@ -118,8 +118,9 @@ window locks). `tools\grab.ps1 -Title "Sticky" -Out x.png [-ProcessId n]` screen
 window. `sticky ha-import` copies the desk dashboard's Home Assistant sign-in into the settings,
 `sticky ha-watch` runs only the Home Assistant connection, and `STICKY_FAKE_PRINT_END=1` makes it
 send a print alert as soon as it connects. `STICKY_SETTINGS_SEARCH=<words>` pre-fills the settings
-search and `STICKY_EDIT=<id>` opens that item's details pane, and `STICKY_NO_FOCUS=1` opens the window
-without taking keyboard focus (for screenshots).
+search and `STICKY_EDIT=<id>` opens that item's details pane, and `STICKY_NO_FOCUS=1` opens windows
+without taking keyboard focus (for screenshots), `STICKY_MUTE=1` plays no sounds and
+`STICKY_FAKE_DOORBELL=1` makes the helper act as if the doorbell was pressed once it connects.
 
 ### Releasing
 

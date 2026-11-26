@@ -7,6 +7,8 @@
 //! - any Home Assistant notification whose ID starts with `sticky` (made by an automation, for
 //!   example one with a webhook trigger). A Markdown picture in it, `![](url)`, comes along.
 //!   It is cleared in Home Assistant once Sticky has it.
+//! - a doorbell being pressed (a Reolink's `binary_sensor.*_visitor` turning on): a ding-dong
+//!   and a pop-up that shows the doorbell's camera live for a few minutes.
 //!
 //! The connection state goes to `.sticky\ha-status.json` for the settings page.
 
@@ -38,6 +40,9 @@ pub struct Status {
     pub camera: String,
     /// Epoch seconds of the last print end we popped up (so it isn't repeated).
     pub last_print_end: f64,
+    /// Doorbell being watched, e.g. "Driveway", and its camera
+    pub doorbell: String,
+    pub doorbell_camera: String,
 }
 
 pub fn status_path() -> std::path::PathBuf {
@@ -87,6 +92,8 @@ pub struct Found {
     pub printers: Vec<(String, String)>,
     /// (camera entity, friendly name)
     pub cameras: Vec<(String, String)>,
+    /// (visitor sensor, doorbell name)
+    pub doorbells: Vec<(String, String)>,
     pub location: String,
 }
 
@@ -101,12 +108,15 @@ pub fn discover(c: &Conn) -> Result<Found, String> {
             f.printers.push((id.to_string(), printer_name(&name)));
         } else if id.starts_with("camera.") {
             f.cameras.push((id.to_string(), name));
+        } else if id.starts_with("binary_sensor.") && id.ends_with("_visitor") {
+            f.doorbells.push((id.to_string(), doorbell_name(&name)));
         } else if id == "zone.home" {
             f.location = name;
         }
     }
     f.printers.sort();
     f.cameras.sort();
+    f.doorbells.sort();
     Ok(f)
 }
 
@@ -115,6 +125,34 @@ fn printer_name(friendly: &str) -> String {
     let lower = n.to_lowercase();
     let n = if lower.ends_with("current print state") { n[..n.len() - "current print state".len()].trim() } else { n };
     if n.is_empty() { "3D".into() } else { n.to_string() }
+}
+
+fn doorbell_name(friendly: &str) -> String {
+    let n = friendly.trim();
+    let n = if n.to_lowercase().ends_with(" visitor") { n[..n.len() - " visitor".len()].trim() } else { n };
+    if n.is_empty() { "Front".into() } else { n.to_string() }
+}
+
+/// The doorbell's camera: the setting, else its own (a Reolink's sub stream "fluent" is quick,
+/// then the main "clear" stream, then any of its cameras).
+fn pick_doorbell_camera(setting: &str, sensor: &str, cameras: &[String]) -> Option<String> {
+    if setting == "none" {
+        return None;
+    }
+    if !setting.is_empty() {
+        return Some(setting.to_string());
+    }
+    let base = sensor.trim_start_matches("binary_sensor.").trim_end_matches("_visitor");
+    for suffix in ["fluent", "clear"] {
+        let c = format!("camera.{base}_{suffix}");
+        if cameras.contains(&c) {
+            return Some(c);
+        }
+    }
+    let prefix = format!("camera.{base}_");
+    let mut own: Vec<&String> = cameras.iter().filter(|c| c.starts_with(&prefix)).collect();
+    own.sort();
+    own.first().map(|c| c.to_string())
 }
 
 /// The camera to photograph a printer with: the setting, else one of the printer's own
@@ -136,6 +174,11 @@ fn pick_camera(setting: &str, state_sensor: &str, cameras: &[String]) -> Option<
 
 /// Add an item that pops up now. Returns its id.
 pub fn add_alert(text: &str, detail: &str, source: &str, picture: Option<String>) -> u64 {
+    add_alert_with(text, detail, source, picture, "", "")
+}
+
+/// `add_alert` with its own pop-up sound and a camera to show live.
+pub fn add_alert_with(text: &str, detail: &str, source: &str, picture: Option<String>, sound: &str, live: &str) -> u64 {
     let s = Settings::load();
     let now = Local::now();
     let category = if s.smart_category && s.categories.iter().any(|c| c == "Today") { "Today".to_string() } else { s.default_category.clone() };
@@ -162,6 +205,8 @@ pub fn add_alert(text: &str, detail: &str, source: &str, picture: Option<String>
         detail: detail.trim().to_string(),
         source: source.to_string(),
         picture,
+        sound: sound.to_string(),
+        live: live.to_string(),
     };
     let id = store::update(|d| d.add(item));
     store::log(&format!("alert from {}", source.to_lowercase()), id, text);
@@ -206,7 +251,7 @@ pub fn start() {
         loop {
             let s = Settings::load();
             let key = settings_key(&s);
-            let wanted = s.ha_print_alerts || s.ha_notifications;
+            let wanted = s.ha_print_alerts || s.ha_notifications || s.ha_doorbell;
             let conn = if wanted { Conn::from_settings(&s) } else { None };
             let Some(conn) = conn else {
                 set_state("off", if !wanted { "Alerts are turned off" } else if s.ha_url.trim().is_empty() { "Not set up" } else { "No token saved" });
@@ -228,7 +273,10 @@ pub fn start() {
 }
 
 fn settings_key(s: &Settings) -> String {
-    format!("{}|{}|{}|{}|{}|{}", s.ha_url, s.ha_token, s.ha_print_alerts, s.ha_printer, s.ha_camera, s.ha_notifications)
+    format!(
+        "{}|{}|{}|{}|{}|{}|{}|{}|{}",
+        s.ha_url, s.ha_token, s.ha_print_alerts, s.ha_printer, s.ha_camera, s.ha_notifications, s.ha_doorbell, s.ha_doorbell_sensor, s.ha_doorbell_camera
+    )
 }
 
 /// Sleep up to `d`, returning early when the Home Assistant settings change.
@@ -255,11 +303,19 @@ struct Printer {
     duration_id: String,
 }
 
+struct Doorbell {
+    sensor: String,
+    name: String,
+    camera: Option<String>,
+}
+
 struct Session<'a> {
     conn: &'a Conn,
     ws: Arc<Ws>,
     next: u64,
     printer: Option<Printer>,
+    doorbell: Option<Doorbell>,
+    last_ring: Option<Instant>,
     states: HashMap<String, Value>,
     handled: HashSet<String>,
     ids: Ids,
@@ -296,8 +352,8 @@ fn session(conn: &Conn, s: &Settings, key: &str) -> Result<(), String> {
         }
     });
 
-    let mut se = Session { conn, ws: ws.clone(), next: 1, printer: None, states: HashMap::new(), handled: HashSet::new(), ids: Ids::default() };
-    if s.ha_print_alerts {
+    let mut se = Session { conn, ws: ws.clone(), next: 1, printer: None, doorbell: None, last_ring: None, states: HashMap::new(), handled: HashSet::new(), ids: Ids::default() };
+    if s.ha_print_alerts || s.ha_doorbell {
         se.ids.get_states = se.send(json!({"type": "get_states"}))?;
     }
     if s.ha_notifications {
@@ -374,9 +430,29 @@ impl Session<'_> {
         Ok(())
     }
 
-    /// The first full list of states: pick the printer and catch up on a missed finish.
+    /// The first full list of states: pick the printer and the doorbell, catch up on a missed
+    /// print finish, then follow their sensors.
     fn found_states(&mut self, list: Vec<Value>, s: &Settings) -> Result<(), String> {
         let cameras: Vec<String> = list.iter().filter_map(|x| x["entity_id"].as_str()).filter(|e| e.starts_with("camera.")).map(String::from).collect();
+        let mut ids = vec![];
+        if s.ha_print_alerts {
+            ids.extend(self.setup_printer(&list, &cameras, s));
+        }
+        let door = if s.ha_doorbell { self.setup_doorbell(&list, &cameras, s) } else { vec![] };
+        if !s.ha_doorbell {
+            let mut st = load_status();
+            st.doorbell.clear();
+            st.doorbell_camera.clear();
+            save_status(&st);
+        }
+        ids.extend(door);
+        if !ids.is_empty() {
+            self.ids.entities = self.send(json!({"type": "subscribe_entities", "entity_ids": ids}))?;
+        }
+        Ok(())
+    }
+
+    fn setup_printer(&mut self, list: &[Value], cameras: &[String], s: &Settings) -> Vec<String> {
         let state_id = if s.ha_printer.is_empty() {
             let mut p: Vec<&str> = list.iter().filter_map(|x| x["entity_id"].as_str()).filter(|e| e.starts_with("sensor.") && e.ends_with("_current_print_state")).collect();
             p.sort();
@@ -389,14 +465,14 @@ impl Session<'_> {
             st.printer = String::new();
             st.detail = format!("{} · no 3D printer found", st.detail);
             save_status(&st);
-            return Ok(());
+            return vec![];
         };
         let entry = list.iter().find(|x| x["entity_id"] == state_id.as_str()).cloned().unwrap_or_default();
         let name = printer_name(entry["attributes"]["friendly_name"].as_str().unwrap_or(""));
         let base = state_id.trim_start_matches("sensor.").trim_end_matches("_current_print_state").to_string();
-        let camera = pick_camera(&s.ha_camera, &state_id, &cameras);
+        let camera = pick_camera(&s.ha_camera, &state_id, cameras);
         let p = Printer { state_id: state_id.clone(), name: name.clone(), camera: camera.clone(), file_id: format!("sensor.{base}_filename"), duration_id: format!("sensor.{base}_print_duration") };
-        for x in &list {
+        for x in list {
             if let Some(e) = x["entity_id"].as_str()
                 && (e == p.state_id || e == p.file_id || e == p.duration_id)
             {
@@ -423,14 +499,46 @@ impl Session<'_> {
             // try the alert without waiting for a real print to end
             self.print_ended("complete", Local::now().timestamp() as f64, false);
         }
-        self.ids.entities = self.send(json!({"type": "subscribe_entities", "entity_ids": ids}))?;
-        Ok(())
+        ids
+    }
+
+    fn setup_doorbell(&mut self, list: &[Value], cameras: &[String], s: &Settings) -> Vec<String> {
+        let sensor = if s.ha_doorbell_sensor.is_empty() {
+            let mut d: Vec<&str> = list.iter().filter_map(|x| x["entity_id"].as_str()).filter(|e| e.starts_with("binary_sensor.") && e.ends_with("_visitor")).collect();
+            d.sort();
+            d.first().map(|x| x.to_string())
+        } else {
+            Some(s.ha_doorbell_sensor.clone())
+        };
+        let mut st = load_status();
+        let Some(sensor) = sensor else {
+            st.doorbell.clear();
+            st.doorbell_camera.clear();
+            save_status(&st);
+            return vec![];
+        };
+        let entry = list.iter().find(|x| x["entity_id"] == sensor.as_str()).cloned().unwrap_or_default();
+        let name = doorbell_name(entry["attributes"]["friendly_name"].as_str().unwrap_or(""));
+        let camera = pick_doorbell_camera(&s.ha_doorbell_camera, &sensor, cameras);
+        self.states.insert(sensor.clone(), json!({"s": entry["state"], "a": entry["attributes"]}));
+        st.doorbell = name.clone();
+        st.doorbell_camera = camera.clone().unwrap_or_default();
+        save_status(&st);
+        self.doorbell = Some(Doorbell { sensor: sensor.clone(), name, camera });
+        if std::env::var_os("STICKY_FAKE_DOORBELL").is_some() {
+            // try the doorbell without anyone pressing it
+            self.doorbell_pressed();
+        }
+        vec![sensor]
     }
 
     /// `subscribe_entities` sends {"a": {id: {s, a}}} first, then {"c": {id: {"+": {s, a}}}}.
     fn entity_event(&mut self, ev: &Value) {
-        let Some(state_id) = self.printer.as_ref().map(|p| p.state_id.clone()) else { return };
-        let before = self.states.get(&state_id).and_then(|x| x["s"].as_str()).unwrap_or("").to_string();
+        let state_of = |m: &HashMap<String, Value>, id: &str| m.get(id).and_then(|x| x["s"].as_str()).unwrap_or("").to_string();
+        let print_id = self.printer.as_ref().map(|p| p.state_id.clone());
+        let door_id = self.doorbell.as_ref().map(|d| d.sensor.clone());
+        let print_before = print_id.as_deref().map(|i| state_of(&self.states, i));
+        let door_before = door_id.as_deref().map(|i| state_of(&self.states, i));
         if let Some(a) = ev["a"].as_object() {
             for (k, v) in a {
                 self.states.insert(k.clone(), json!({"s": v["s"], "a": v["a"]}));
@@ -450,10 +558,38 @@ impl Session<'_> {
                 }
             }
         }
-        let after = self.states.get(&state_id).and_then(|x| x["s"].as_str()).unwrap_or("").to_string();
-        if before != after && BUSY_STATES.contains(&before.as_str()) && DONE_STATES.contains(&after.as_str()) {
-            self.print_ended(&after, Local::now().timestamp() as f64, false);
+        if let (Some(id), Some(before)) = (&print_id, print_before) {
+            let after = state_of(&self.states, id);
+            if before != after && BUSY_STATES.contains(&before.as_str()) && DONE_STATES.contains(&after.as_str()) {
+                self.print_ended(&after, Local::now().timestamp() as f64, false);
+            }
         }
+        if let (Some(id), Some(before)) = (&door_id, door_before) {
+            let after = state_of(&self.states, id);
+            if before == "off" && after == "on" {
+                self.doorbell_pressed();
+            }
+        }
+    }
+
+    /// Someone pressed the doorbell: a ding-dong pop-up with the camera's picture, shown live.
+    fn doorbell_pressed(&mut self) {
+        if self.last_ring.is_some_and(|t| t.elapsed() < Duration::from_secs(15)) {
+            return; // pressed again straight away: the pop-up is already up
+        }
+        self.last_ring = Some(Instant::now());
+        let Some(d) = &self.doorbell else { return };
+        let picture = d.camera.as_ref().and_then(|c| match net::get(&self.conn.url, &format!("/api/camera_proxy/{c}"), Some(&self.conn.token)) {
+            Ok(b) => crate::picture::save(&b),
+            Err(e) => {
+                store::log("home assistant", 0, &format!("doorbell picture from {c}: {e}"));
+                None
+            }
+        });
+        let s = Settings::load();
+        let at = Local::now().format(if s.use_24h { "%H:%M" } else { "%-I:%M %P" });
+        let detail = format!("{} doorbell · {at}", d.name);
+        add_alert_with("Someone's at the door", &detail, "Doorbell", picture, "doorbell", d.camera.as_deref().unwrap_or(""));
     }
 
     fn print_ended(&mut self, state: &str, at: f64, late: bool) {
@@ -526,6 +662,19 @@ impl Session<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn doorbell_bits() {
+        assert_eq!(doorbell_name("Driveway Visitor"), "Driveway");
+        assert_eq!(doorbell_name(""), "Front");
+        let cams: Vec<String> = ["camera.driveway_high_resolution_channel", "camera.driveway_fluent", "camera.driveway_clear"].iter().map(|x| x.to_string()).collect();
+        assert_eq!(pick_doorbell_camera("", "binary_sensor.driveway_visitor", &cams).as_deref(), Some("camera.driveway_fluent"));
+        assert_eq!(pick_doorbell_camera("none", "binary_sensor.driveway_visitor", &cams), None);
+        assert_eq!(pick_doorbell_camera("camera.x", "binary_sensor.driveway_visitor", &cams).as_deref(), Some("camera.x"));
+        let wav = crate::sound::doorbell_wav();
+        assert_eq!(&wav[0..4], b"RIFF");
+        assert!(crate::sound::louder(&wav, 2.0).is_some());
+    }
+
     #[test]
     fn pictures_and_names() {
         let (t, u) = take_picture("Done!\n![photo](/api/camera_proxy/camera.x) after");

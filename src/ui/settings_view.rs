@@ -458,6 +458,9 @@ fn ha_connect(ui: &mut egui::Ui, pal: &Pal, s: &mut Settings, ha: &mut HaUi) {
                 line += &format!(", photo from {cam}");
             }
         }
+        if st.state == "connected" && !st.doorbell.is_empty() && s.ha_doorbell {
+            line += &format!(" · the {} doorbell", st.doorbell);
+        }
         ui.label(RichText::new(line).size(12.0).color(pal.dim));
     });
     if let Some(Err(e)) = ha.found.lock().ok().and_then(|f| f.clone()) {
@@ -472,6 +475,39 @@ fn ha_control(ui: &mut egui::Ui, pal: &Pal, key: &str, s: &mut Settings, ha: &mu
     let found = ha.found();
     match key {
         "ha_print_alerts" => toggle(ui, pal, &mut s.ha_print_alerts),
+        "ha_doorbell" => {
+            toggle(ui, pal, &mut s.ha_doorbell);
+            if ui.button("Ring now").on_hover_text("Plays the doorbell sound").clicked() {
+                crate::sound::ring("doorbell");
+            }
+        }
+        "ha_doorbell_sensor" => {
+            let label = if s.ha_doorbell_sensor.is_empty() {
+                "First one found".to_string()
+            } else {
+                found.as_ref().and_then(|f| f.doorbells.iter().find(|p| p.0 == s.ha_doorbell_sensor).map(|p| p.1.clone())).unwrap_or_else(|| s.ha_doorbell_sensor.clone())
+            };
+            egui::ComboBox::from_id_salt("ha_doorbell_sensor").selected_text(label).width(230.0).show_ui(ui, |ui| {
+                ui.selectable_value(&mut s.ha_doorbell_sensor, String::new(), "First one found");
+                for (id, name) in found.iter().flat_map(|f| f.doorbells.iter()) {
+                    ui.selectable_value(&mut s.ha_doorbell_sensor, id.clone(), format!("{name}  ({id})"));
+                }
+            });
+        }
+        "ha_doorbell_camera" => {
+            let label = match s.ha_doorbell_camera.as_str() {
+                "" => "The doorbell's own camera".to_string(),
+                "none" => "No picture".to_string(),
+                c => found.as_ref().and_then(|f| f.cameras.iter().find(|x| x.0 == c).map(|x| x.1.clone())).unwrap_or_else(|| c.to_string()),
+            };
+            egui::ComboBox::from_id_salt("ha_doorbell_camera").selected_text(label).width(230.0).show_ui(ui, |ui| {
+                ui.selectable_value(&mut s.ha_doorbell_camera, String::new(), "The doorbell's own camera");
+                ui.selectable_value(&mut s.ha_doorbell_camera, "none".to_string(), "No picture");
+                for (id, name) in found.iter().flat_map(|f| f.cameras.iter()) {
+                    ui.selectable_value(&mut s.ha_doorbell_camera, id.clone(), name.as_str());
+                }
+            });
+        }
         "ha_notifications" => {
             toggle(ui, pal, &mut s.ha_notifications);
             let b = ui.add_enabled(!s.ha_url.is_empty(), egui::Button::new("Copy webhook setup"));

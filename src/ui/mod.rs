@@ -623,6 +623,8 @@ pub fn item_from(p: &crate::parse::Parsed, s: &Settings, fallback_cat: Option<&s
         detail: String::new(),
         source: String::new(),
         picture: None,
+        sound: String::new(),
+        live: String::new(),
     }
 }
 

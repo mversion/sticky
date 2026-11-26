@@ -13,19 +13,23 @@ use std::time::Duration;
 
 /// (setting key, label, file in C:\Windows\Media). "windows" is whatever the Windows sound
 /// scheme has for Calendar Reminder.
-pub const SOUNDS: [(&str, &str, &str); 6] = [
+pub const SOUNDS: [(&str, &str, &str); 7] = [
     ("alarm", "Alarm", "Alarm01.wav"),
     ("alarm2", "Alarm 2", "Alarm02.wav"),
     ("ring", "Ring", "Ring01.wav"),
     ("chimes", "Chimes", "chimes.wav"),
     ("notify", "Notify", "Windows Notify System Generic.wav"),
     ("windows", "Windows reminder", ""),
+    ("doorbell", "Doorbell", ""),
 ];
 
 const RING_MUTEX: &str = "Local\\Sticky.Ring";
 
 /// Start the sound in its own process and return straight away.
 pub fn ring(name: &str) {
+    if std::env::var_os("STICKY_MUTE").is_some() {
+        return; // test runs
+    }
     win::spawn_self(&["ring", name]);
 }
 
@@ -34,7 +38,7 @@ pub fn run(name: &str) {
     let s = Settings::load();
     // One at a time, so two reminders together don't stack the turn-down and restore wrongly.
     let _turn = win::wait_mutex(RING_MUTEX, Duration::from_secs(20));
-    let wav = file(name).and_then(|p| std::fs::read(p).ok());
+    let wav = if name == "doorbell" { Some(doorbell_wav()) } else { file(name).and_then(|p| std::fs::read(p).ok()) };
     let wav = wav.map(|w| louder(&w, s.sound_boost.clamp(1, 8) as f32).unwrap_or(w));
     let ducked = if s.sound_duck { duck::down(0.2) } else { vec![] };
     match &wav {
@@ -53,6 +57,40 @@ fn file(name: &str) -> Option<PathBuf> {
         media.join(SOUNDS.iter().find(|s| s.0 == name).map(|s| s.2).unwrap_or("Alarm01.wav"))
     };
     p.is_file().then_some(p)
+}
+
+/// A two-note ding-dong (E5 then C5, bell-like with a few overtones), as a 16-bit mono WAV.
+/// Peaks around -10 dBFS like the Windows files, so the loudness setting treats it the same.
+pub fn doorbell_wav() -> Vec<u8> {
+    let rate = 22050u32;
+    let len = (rate as f32 * 2.4) as usize;
+    let mut buf = vec![0f32; len];
+    let tau = std::f32::consts::TAU;
+    for (f, start) in [(659.25f32, 0.0f32), (523.25, 0.6)] {
+        let s0 = (start * rate as f32) as usize;
+        for (i, out) in buf.iter_mut().enumerate().skip(s0) {
+            let t = (i - s0) as f32 / rate as f32;
+            let attack = (t * 300.0).min(1.0);
+            let v = (tau * f * t).sin() * (-t * 2.0).exp() + 0.4 * (tau * 2.0 * f * t).sin() * (-t * 4.5).exp() + 0.2 * (tau * 3.01 * f * t).sin() * (-t * 7.0).exp();
+            *out += 0.2 * attack * v;
+        }
+    }
+    let data: Vec<u8> = buf.iter().flat_map(|x| ((x.clamp(-1.0, 1.0) * 32767.0) as i16).to_le_bytes()).collect();
+    let mut w = Vec::with_capacity(44 + data.len());
+    w.extend_from_slice(b"RIFF");
+    w.extend_from_slice(&(36 + data.len() as u32).to_le_bytes());
+    w.extend_from_slice(b"WAVEfmt ");
+    w.extend_from_slice(&16u32.to_le_bytes());
+    w.extend_from_slice(&1u16.to_le_bytes()); // PCM
+    w.extend_from_slice(&1u16.to_le_bytes()); // mono
+    w.extend_from_slice(&rate.to_le_bytes());
+    w.extend_from_slice(&(rate * 2).to_le_bytes());
+    w.extend_from_slice(&2u16.to_le_bytes());
+    w.extend_from_slice(&16u16.to_le_bytes());
+    w.extend_from_slice(b"data");
+    w.extend_from_slice(&(data.len() as u32).to_le_bytes());
+    w.extend_from_slice(&data);
+    w
 }
 
 fn expand_env(s: &str) -> String {

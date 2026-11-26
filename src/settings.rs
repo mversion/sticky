@@ -65,6 +65,12 @@ pub struct Settings {
     /// Camera for the photo; empty picks the printer's own, "none" for no photo
     pub ha_camera: String,
     pub ha_notifications: bool,
+    /// Doorbell pressed: ding-dong and a pop-up with live footage
+    pub ha_doorbell: bool,
+    /// The doorbell's visitor sensor; empty picks the first `binary_sensor.*_visitor`
+    pub ha_doorbell_sensor: String,
+    /// Camera for the footage; empty picks the doorbell's own, "none" for no picture
+    pub ha_doorbell_camera: String,
 }
 
 /// A folder's look. Empty strings mean the default (grey folder icon).
@@ -124,6 +130,9 @@ impl Default for Settings {
             ha_printer: String::new(),
             ha_camera: String::new(),
             ha_notifications: true,
+            ha_doorbell: true,
+            ha_doorbell_sensor: String::new(),
+            ha_doorbell_camera: String::new(),
         }
     }
 }
@@ -196,6 +205,9 @@ pub const META: &[Meta] = &[
     Meta { key: "ha_print_alerts", section: "Home Assistant", label: "3D print alerts", help: "Pops up when a print finishes, is cancelled or fails, with a photo from the printer's camera. A print that ended while the PC was off pops up later (up to 12 hours).", keywords: "printer 3d print snapmaker u1 moonraker klipper finished done camera photo" },
     Meta { key: "ha_printer", section: "Home Assistant", label: "Printer", help: "Printers come from Home Assistant's Moonraker integration.", keywords: "3d printer u1 snapmaker moonraker" },
     Meta { key: "ha_camera", section: "Home Assistant", label: "Photo from", help: "The camera that takes the picture on a print alert.", keywords: "camera photo picture snapshot image" },
+    Meta { key: "ha_doorbell", section: "Home Assistant", label: "Doorbell", help: "When someone presses the doorbell, Sticky plays a ding-dong and pops up with live footage from the doorbell's camera for 3 minutes (click the picture to watch again). Works with a Reolink doorbell, or any doorbell with a visitor sensor.", keywords: "doorbell door bell reolink visitor ring chime front door camera live footage video" },
+    Meta { key: "ha_doorbell_sensor", section: "Home Assistant", label: "Doorbell button", help: "The doorbell's visitor sensor in Home Assistant.", keywords: "doorbell visitor button press reolink" },
+    Meta { key: "ha_doorbell_camera", section: "Home Assistant", label: "Footage from", help: "The camera the doorbell pop-up shows live.", keywords: "doorbell camera live footage video picture" },
     Meta { key: "ha_notifications", section: "Home Assistant", label: "Alerts from automations and webhooks", help: "A Home Assistant notification whose ID starts with \"sticky\" pops up here and is then cleared. A picture in it, ![](address), comes too. Copy webhook setup copies a ready-made automation.", keywords: "webhook automation notification relay external services ifttt api url persistent" },
     Meta { key: "note_window", section: "Sticky note", label: "Show the sticky note on the desktop", help: "A small always-there note with your open and done items. The desk dashboard has its own Sticky tile too.", keywords: "pin desktop widget permanent window dashboard" },
     Meta { key: "note_on_top", section: "Sticky note", label: "Keep the sticky note on top", help: "Stays above other windows.", keywords: "always top float pin" },

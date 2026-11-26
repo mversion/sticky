@@ -126,6 +126,12 @@ pub struct Item {
     /// A picture file in `.sticky\pictures`, shown on the pop-up.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub picture: Option<String>,
+    /// A sound for this item's pop-up instead of the usual one (the doorbell's ding-dong).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub sound: String,
+    /// A Home Assistant camera the pop-up shows live for a few minutes (the doorbell).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub live: String,
 }
 
 impl Item {
