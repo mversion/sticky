@@ -46,8 +46,12 @@ pub struct Settings {
     pub note_color: String,
     pub note_pos: Option<[i32; 2]>,
     pub note_size: [f32; 2],
+    /// Colour and icon per folder, by folder name (set from the sidebar's right-click menu)
+    pub folder_styles: std::collections::BTreeMap<String, FolderStyle>,
     // Main window
     pub main_size: [f32; 2],
+    /// Width of the details pane on the right
+    pub detail_width: f32,
     // Updates
     pub check_updates: bool,
     pub auto_update: bool,
@@ -61,6 +65,16 @@ pub struct Settings {
     /// Camera for the photo; empty picks the printer's own, "none" for no photo
     pub ha_camera: String,
     pub ha_notifications: bool,
+}
+
+/// A folder's look. Empty strings mean the default (grey folder icon).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
+#[serde(default)]
+pub struct FolderStyle {
+    /// "#RRGGBB"
+    pub color: String,
+    /// A name from `ui::FOLDER_ICONS`
+    pub icon: String,
 }
 
 impl Default for Settings {
@@ -99,7 +113,9 @@ impl Default for Settings {
             note_color: "yellow".into(),
             note_pos: None,
             note_size: [300.0, 420.0],
+            folder_styles: Default::default(),
             main_size: [920.0, 640.0],
+            detail_width: 380.0,
             check_updates: true,
             auto_update: true,
             ha_url: String::new(),
@@ -162,7 +178,7 @@ pub const META: &[Meta] = &[
     Meta { key: "font_scale", section: "Appearance", label: "Text size", help: "Scales all text.", keywords: "font zoom bigger smaller size" },
     Meta { key: "compact", section: "Appearance", label: "Compact rows", help: "Tighter list rows to fit more on screen.", keywords: "density spacing dense" },
     Meta { key: "use_24h", section: "Appearance", label: "24-hour clock", help: "Show 16:00 instead of 4:00 pm.", keywords: "time format am pm" },
-    Meta { key: "categories", section: "Tasks", label: "Folders", help: "Your folders, in order. You can also add one with + next to Folders in the sidebar, and right-click a folder to rename, move or delete it. Type #name when adding (#upnext, #later). Prefixes work: #up, #some.", keywords: "folders categories lists groups up next later someday today buckets" },
+    Meta { key: "categories", section: "Tasks", label: "Folders", help: "Your folders, in order. You can also add one with + next to Folders in the sidebar, and right-click a folder to rename it, move it, delete it or give it a colour and icon. Type #name when adding (#upnext, #later). Prefixes work: #up, #some.", keywords: "folders categories lists groups up next later someday today buckets" },
     Meta { key: "default_category", section: "Tasks", label: "Default folder", help: "Where new items go when you don't say.", keywords: "folder category list group new" },
     Meta { key: "smart_category", section: "Tasks", label: "Due today goes to Today", help: "Items due today land in the Today folder if you have one.", keywords: "auto smart sort" },
     Meta { key: "show_done_days", section: "Tasks", label: "Keep done items visible (days)", help: "Done items older than this are hidden from lists and the dashboard, but stay in Done and the log.", keywords: "completed archive history finished" },

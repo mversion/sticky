@@ -265,6 +265,79 @@ pub fn apply_style(ctx: &egui::Context, pal: &Pal, s: &Settings) {
     });
 }
 
+/// Icons a folder can have (Segoe Fluent Icons). The name is what settings.json stores.
+pub const FOLDER_ICONS: &[(&str, &str)] = &[
+    ("folder", "\u{E8B7}"),
+    ("star", "\u{E734}"),
+    ("heart", "\u{EB51}"),
+    ("home", "\u{E80F}"),
+    ("work", "\u{E821}"),
+    ("cart", "\u{E7BF}"),
+    ("mail", "\u{E715}"),
+    ("phone", "\u{E717}"),
+    ("calendar", "\u{E787}"),
+    ("flag", "\u{E7C1}"),
+    ("idea", "\u{EA80}"),
+    ("people", "\u{E716}"),
+    ("money", "\u{E8EF}"),
+    ("travel", "\u{E709}"),
+    ("car", "\u{E804}"),
+    ("music", "\u{EC4F}"),
+    ("camera", "\u{E722}"),
+    ("code", "\u{E943}"),
+    ("tools", "\u{E90F}"),
+    ("print", "\u{E749}"),
+    ("web", "\u{E774}"),
+    ("pin", "\u{E718}"),
+    ("urgent", "\u{E8C9}"),
+    ("gift", "\u{E719}"),
+    ("study", "\u{E7BE}"),
+    ("games", "\u{E7FC}"),
+    ("tag", "\u{E8EC}"),
+    ("private", "\u{E72E}"),
+    ("time", "\u{E823}"),
+    ("document", "\u{E8A5}"),
+    ("stock", "\u{E7B8}"),
+    ("bug", "\u{EBE8}"),
+    ("coffee", "\u{EC32}"),
+    ("marketing", "\u{E789}"),
+    ("health", "\u{E95E}"),
+    ("exercise", "\u{E805}"),
+    ("garden", "\u{EC0A}"),
+    ("reports", "\u{E9D2}"),
+    ("cloud", "\u{E753}"),
+    ("power", "\u{E945}"),
+    ("video", "\u{E714}"),
+    ("reading", "\u{E82D}"),
+    ("fun", "\u{E76E}"),
+    ("access", "\u{E8D7}"),
+    ("design", "\u{E790}"),
+    ("security", "\u{EA18}"),
+    ("3d print", "\u{F158}"),
+    ("projects", "\u{EA86}"),
+];
+
+/// Folder colours on offer. Mid tones so they read on both dark and light themes.
+pub const FOLDER_COLOURS: &[(&str, &str)] = &[
+    ("Red", "#E5534B"),
+    ("Orange", "#F0883E"),
+    ("Yellow", "#E3B341"),
+    ("Green", "#57AB5A"),
+    ("Teal", "#2FB5A8"),
+    ("Blue", "#539BF5"),
+    ("Purple", "#986EE2"),
+    ("Pink", "#E275AD"),
+    ("Brown", "#B08968"),
+    ("Grey", "#8B949E"),
+];
+
+/// A folder's icon and colour (None = the theme's default).
+pub fn folder_look(s: &Settings, name: &str) -> (&'static str, Option<Color32>) {
+    let st = s.folder_styles.get(name);
+    let g = st.and_then(|x| FOLDER_ICONS.iter().find(|(n, _)| *n == x.icon)).map(|(_, g)| *g).unwrap_or(ic::FOLDER);
+    (g, st.and_then(|x| hex(&x.color)))
+}
+
 pub fn chip(ui: &mut egui::Ui, glyph: &str, text: &str, c: Color32) {
     egui::Frame::new()
         .fill(c.gamma_multiply(0.14))
@@ -384,7 +457,8 @@ pub fn item_row(ui: &mut egui::Ui, it: &Item, pal: &Pal, s: &Settings, o: &RowOp
                         chip(ui, ic::FLAG, it.priority.label(), priority_color(it.priority, pal));
                     }
                     if o.show_category && !it.category.is_empty() {
-                        chip(ui, ic::FOLDER, &it.category, pal.dim);
+                        let (g, c) = folder_look(s, &it.category);
+                        chip(ui, g, &it.category, c.unwrap_or(pal.dim));
                     }
                     for t in &it.tags {
                         chip(ui, "", &format!("#{t}"), pal.blue);
@@ -579,7 +653,8 @@ pub fn preview(ui: &mut egui::Ui, p: &crate::parse::Parsed, pal: &Pal, s: &Setti
         if p.priority != Priority::None {
             chip(ui, ic::FLAG, p.priority.label(), priority_color(p.priority, pal));
         }
-        chip(ui, ic::FOLDER, cat, pal.dim);
+        let (g, c) = folder_look(s, cat);
+        chip(ui, g, cat, c.unwrap_or(pal.dim));
         for t in &p.tags {
             chip(ui, "", &format!("#{t}"), pal.blue);
         }

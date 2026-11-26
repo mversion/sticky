@@ -35,8 +35,8 @@ upgrades and uninstalling.
 Quick add: Enter adds, Esc closes, Ctrl+O opens the full window, Ctrl+, opens settings. It closes
 when you click away.
 
-The main window has All open (grouped by folder), each folder (+ next to Folders adds one; right-click a folder to rename, move or delete it), Reminders, Notes, Done, an
-Activity log and a searchable Settings page. Click an item to edit it; hover for pin and delete.
+The main window has All open (grouped by folder), each folder (+ next to Folders adds one; right-click a folder to rename, move or delete it, or give it a colour and an icon), Reminders, Notes, Done, an
+Activity log and a searchable Settings page. Click an item to open its details in a pane on the right (drag its edge to resize); hover for pin and delete.
 An optional always-on-top sticky note shows open items and what got done today.
 
 ## What you can type
@@ -118,7 +118,8 @@ window locks). `tools\grab.ps1 -Title "Sticky" -Out x.png [-ProcessId n]` screen
 window. `sticky ha-import` copies the desk dashboard's Home Assistant sign-in into the settings,
 `sticky ha-watch` runs only the Home Assistant connection, and `STICKY_FAKE_PRINT_END=1` makes it
 send a print alert as soon as it connects. `STICKY_SETTINGS_SEARCH=<words>` pre-fills the settings
-search and `STICKY_EDIT=<id>` opens that item's editor (for screenshots).
+search and `STICKY_EDIT=<id>` opens that item's details pane, and `STICKY_NO_FOCUS=1` opens the window
+without taking keyboard focus (for screenshots).
 
 ### Releasing
 

@@ -89,7 +89,9 @@ pub fn run(mode: &str) {
         .with_min_inner_size(Vec2::new(420.0, 90.0))
         .with_decorations(false)
         .with_resizable(true)
-        .with_taskbar(m == Mode::Full);
+        .with_taskbar(m == Mode::Full)
+        // STICKY_NO_FOCUS: open without taking keyboard focus (test screenshots)
+        .with_active(std::env::var_os("STICKY_NO_FOCUS").is_none());
     let mode = mode.to_string();
     let _ = eframe::run_native(
         "Sticky",
@@ -294,6 +296,9 @@ impl MainApp {
                 if s.default_category == old {
                     s.default_category = new.clone();
                 }
+                if let Some(st) = s.folder_styles.remove(&old) {
+                    s.folder_styles.insert(new.clone(), st);
+                }
                 s.save();
                 store::update(|d| {
                     for i in d.items.iter_mut().filter(|i| i.category == old) {
@@ -304,6 +309,16 @@ impl MainApp {
                 if self.view == View::Category(old) {
                     self.view = View::Category(new);
                 }
+            }
+            FolderAct::Colour(name, c) => {
+                s.folder_styles.entry(name.clone()).or_default().color = c;
+                s.folder_styles.retain(|_, st| !st.color.is_empty() || !st.icon.is_empty());
+                s.save();
+            }
+            FolderAct::Icon(name, g) => {
+                s.folder_styles.entry(name.clone()).or_default().icon = g;
+                s.folder_styles.retain(|_, st| !st.color.is_empty() || !st.icon.is_empty());
+                s.save();
             }
             FolderAct::Move(from, to) => {
                 if from < s.categories.len() && to < s.categories.len() {
@@ -316,6 +331,7 @@ impl MainApp {
                     return;
                 }
                 s.categories.retain(|c| *c != name);
+                s.folder_styles.remove(&name);
                 if s.default_category == name {
                     s.default_category = s.categories[0].clone();
                 }
@@ -491,9 +507,6 @@ impl MainApp {
                     }
                 });
             }
-            if selected && self.mode == Mode::Full {
-                self.editor_ui(ui);
-            }
         }
         for (id, a) in todo {
             if self.mode == Mode::Capture && a == RowAct::Open {
@@ -519,7 +532,7 @@ impl MainApp {
             .stroke(Stroke::new(1.0, pal.border))
             .corner_radius(CornerRadius::same(10))
             .inner_margin(Margin::same(12))
-            .outer_margin(Margin { left: 30, right: 4, top: 2, bottom: 8 })
+            .outer_margin(Margin { left: 0, right: 2, top: 0, bottom: 8 })
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 let r = ui.add(egui::TextEdit::multiline(&mut e.text).desired_rows(2).desired_width(f32::INFINITY));
@@ -528,7 +541,7 @@ impl MainApp {
                     save = true;
                 }
                 ui.add_space(4.0);
-                let rows = if e.notes.is_empty() { 1 } else { 3 };
+                let rows = if e.notes.is_empty() { 3 } else { 5 };
                 ui.add(
                     egui::TextEdit::multiline(&mut e.notes)
                         .hint_text("Notes: details, links, anything (Enter for a new line)")
@@ -590,8 +603,8 @@ impl MainApp {
                 ui.add_space(6.0);
                 egui::Grid::new("ed").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
                     ui.label(RichText::new("When").color(pal.dim));
-                    ui.horizontal(|ui| {
-                        let r = ui.add(egui::TextEdit::singleline(&mut e.when).hint_text("tomorrow 4pm, fri, 25/12 9:30am…").desired_width(230.0));
+                    ui.vertical(|ui| {
+                        let r = ui.add(egui::TextEdit::singleline(&mut e.when).hint_text("tomorrow 4pm, fri, 25/12 9:30am…").desired_width(ui.available_width().min(260.0)));
                         if r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
                             save = true;
                         }
@@ -615,15 +628,6 @@ impl MainApp {
                     ui.label(RichText::new("Repeat").color(pal.dim));
                     ui.vertical(|ui| repeat_editor(ui, &pal, &mut e.repeat));
                     ui.end_row();
-                    ui.label(RichText::new("Folder").color(pal.dim));
-                    ui.horizontal_wrapped(|ui| {
-                        for c in &cats {
-                            if ui.selectable_label(&e.category == c, c).clicked() {
-                                e.category = c.clone();
-                            }
-                        }
-                    });
-                    ui.end_row();
                     ui.label(RichText::new("Priority").color(pal.dim));
                     ui.horizontal(|ui| {
                         for p in Priority::ALL {
@@ -641,6 +645,20 @@ impl MainApp {
                     });
                     ui.end_row();
                 });
+                ui.add_space(8.0);
+                ui.label(RichText::new("Folder").color(pal.dim));
+                    ui.horizontal_wrapped(|ui| {
+                        ui.spacing_mut().item_spacing.y = 6.0;
+                        for c in &cats {
+                            let (g, col) = folder_look(&s, c);
+                            let mut job = egui::text::LayoutJob::default();
+                            job.append(g, 0.0, egui::TextFormat { font_id: icon_font(12.0), color: col.unwrap_or(pal.dim), valign: Align::Center, ..Default::default() });
+                            job.append(c, 5.0, egui::TextFormat { font_id: egui::FontId::proportional(14.0 * s.font_scale), color: pal.text, valign: Align::Center, ..Default::default() });
+                            if ui.selectable_label(&e.category == c, job).clicked() {
+                                e.category = c.clone();
+                            }
+                        }
+                    });
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
                     if ui.add(egui::Button::new(RichText::new("Save").color(pal.on_accent)).fill(pal.accent)).clicked() {
@@ -673,6 +691,41 @@ impl MainApp {
             self.editor = None;
             self.act(id, RowAct::Delete);
         }
+    }
+
+    /// The details pane on the right: the open item's editor.
+    fn detail_pane(&mut self, ui: &mut egui::Ui) {
+        let pal = self.pal;
+        egui::Frame::new().fill(pal.panel).inner_margin(Margin { left: 14, right: 12, top: 12, bottom: 8 }).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.set_height(ui.available_height());
+            let mut close = false;
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("Details").font(semi(15.0)).color(pal.text));
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    let b = ui.add(egui::Button::new(icon(ic::CLOSE, 10.0, pal.dim)).frame(false)).on_hover_text("Close (Esc)");
+                    if b.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                        close = true;
+                    }
+                });
+            });
+            if let Some(it) = self.editor.as_ref().and_then(|e| self.data.get(e.id)) {
+                let f = if self.settings.use_24h { "%a %-d %b %Y, %H:%M" } else { "%a %-d %b %Y, %-I:%M%P" };
+                let mut meta = format!("Added {}", it.created.format(f));
+                if let Some(d) = it.done_at.filter(|_| it.done) {
+                    meta += &format!("   Done {}", d.format(f));
+                }
+                if !it.source.is_empty() {
+                    meta += &format!("   From {}", it.source);
+                }
+                ui.label(RichText::new(meta).size(11.5).color(pal.faint));
+            }
+            ui.add_space(8.0);
+            egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| self.editor_ui(ui));
+            if close {
+                self.editor = None;
+            }
+        });
     }
 
     fn visible_done(&self, i: &Item) -> bool {
@@ -806,7 +859,7 @@ impl MainApp {
             let mut entries: Vec<(String, &str, View, usize)> = vec![("All open".into(), ic::INBOX, View::Open, open_tasks(&|i| i.kind == Kind::Task))];
             for c in &self.settings.categories {
                 let cc = c.clone();
-                entries.push((c.clone(), ic::FOLDER, View::Category(c.clone()), open_tasks(&move |i: &Item| i.kind == Kind::Task && i.category == cc)));
+                entries.push((c.clone(), folder_look(&self.settings, c).0, View::Category(c.clone()), open_tasks(&move |i: &Item| i.kind == Kind::Task && i.category == cc)));
             }
             let other = open_tasks(&|i| i.kind == Kind::Task && !self.settings.categories.contains(&i.category));
             if other > 0 {
@@ -866,7 +919,8 @@ impl MainApp {
                     });
                     continue;
                 }
-                let r = nav_resp(ui, &pal, g, &label, Some(n), self.view == v);
+                let tint = if is_folder { folder_look(&self.settings, &label).1 } else { None };
+                let r = nav_resp(ui, &pal, g, &label, Some(n), self.view == v, tint);
                 if r.clicked() {
                     clicked = Some(v.clone());
                 }
@@ -885,6 +939,45 @@ impl MainApp {
                             folder_act = Some(FolderAct::Move(pos, pos + 1));
                             ui.close();
                         }
+                        ui.separator();
+                        let style = self.settings.folder_styles.get(&label).cloned().unwrap_or_default();
+                        ui.menu_button("Colour", |ui| {
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = 4.0;
+                                for (name, hx) in FOLDER_COLOURS {
+                                    let c = hex(hx).unwrap_or(pal.dim);
+                                    let (r, resp) = ui.allocate_exact_size(Vec2::splat(22.0), egui::Sense::click());
+                                    ui.painter().circle_filled(r.center(), 8.0, c);
+                                    if style.color.eq_ignore_ascii_case(hx) || resp.hovered() {
+                                        ui.painter().circle_stroke(r.center(), 10.5, Stroke::new(1.5, pal.text));
+                                    }
+                                    if resp.on_hover_text(*name).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                                        folder_act = Some(FolderAct::Colour(label.clone(), hx.to_string()));
+                                        ui.close();
+                                    }
+                                }
+                            });
+                            if ui.add_enabled(!style.color.is_empty(), egui::Button::new("No colour")).clicked() {
+                                folder_act = Some(FolderAct::Colour(label.clone(), String::new()));
+                                ui.close();
+                            }
+                        });
+                        ui.menu_button("Icon", |ui| {
+                            let tint = hex(&style.color).unwrap_or(pal.text);
+                            egui::Grid::new("folder-icons").spacing([2.0, 2.0]).show(ui, |ui| {
+                                for (k, (name, g)) in FOLDER_ICONS.iter().enumerate() {
+                                    let sel = style.icon == *name || (style.icon.is_empty() && k == 0);
+                                    let b = ui.add(egui::Button::new(icon(g, 16.0, tint)).selected(sel).min_size(Vec2::splat(30.0))).on_hover_text(*name);
+                                    if b.clicked() {
+                                        folder_act = Some(FolderAct::Icon(label.clone(), if k == 0 { String::new() } else { name.to_string() }));
+                                        ui.close();
+                                    }
+                                    if k % 8 == 7 {
+                                        ui.end_row();
+                                    }
+                                }
+                            });
+                        });
                         ui.separator();
                         let tip = if n > 0 { format!("Its {n} open item(s) move to {}", self.settings.default_category) } else { "It's empty".to_string() };
                         if ui.add_enabled(folders.len() > 1, egui::Button::new(RichText::new("Delete folder").color(pal.red))).on_hover_text(tip).clicked() {
@@ -932,6 +1025,12 @@ impl MainApp {
                 View::Settings => "Settings".into(),
             };
             ui.horizontal(|ui| {
+                if let View::Category(c) = &self.view
+                    && !c.is_empty()
+                {
+                    let (g, col) = folder_look(&self.settings, c);
+                    ui.label(icon(g, 18.0, col.unwrap_or(pal.dim)));
+                }
                 ui.heading(&title);
                 if self.view == View::Done {
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -976,7 +1075,8 @@ impl MainApp {
                                 continue;
                             }
                             any = true;
-                            group_header(ui, &pal, if c.is_empty() { "Other" } else { &c }, ids.len());
+                            let (g, col) = folder_look(&self.settings, &c);
+                            folder_header(ui, &pal, g, col, if c.is_empty() { "Other" } else { &c }, ids.len());
                             self.rows(ui, &ids, false);
                             ui.add_space(8.0);
                         }
@@ -1083,10 +1183,11 @@ fn fix_slash_time(s: &str) -> String {
 }
 
 fn nav(ui: &mut egui::Ui, pal: &Pal, g: &str, label: &str, count: Option<usize>, sel: bool) -> bool {
-    nav_resp(ui, pal, g, label, count, sel).clicked()
+    nav_resp(ui, pal, g, label, count, sel, None).clicked()
 }
 
-fn nav_resp(ui: &mut egui::Ui, pal: &Pal, g: &str, label: &str, count: Option<usize>, sel: bool) -> egui::Response {
+/// A sidebar entry. `tint` is a folder's own colour for its icon.
+fn nav_resp(ui: &mut egui::Ui, pal: &Pal, g: &str, label: &str, count: Option<usize>, sel: bool, tint: Option<Color32>) -> egui::Response {
     let (r, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 32.0), egui::Sense::click());
     let fill = if sel { pal.accent.gamma_multiply(0.16) } else if resp.hovered() { pal.hover } else { Color32::TRANSPARENT };
     ui.painter().rect_filled(r, CornerRadius::same(7), fill);
@@ -1094,7 +1195,7 @@ fn nav_resp(ui: &mut egui::Ui, pal: &Pal, g: &str, label: &str, count: Option<us
         ui.painter().rect_filled(egui::Rect::from_min_size(r.left_top() + Vec2::new(0.0, 8.0), Vec2::new(3.0, 16.0)), CornerRadius::same(2), pal.accent);
     }
     let c = if sel { pal.text } else { pal.dim };
-    ui.painter().text(r.left_center() + Vec2::new(14.0, 0.0), egui::Align2::LEFT_CENTER, g, icon_font(13.0), if sel { pal.accent } else { pal.faint });
+    ui.painter().text(r.left_center() + Vec2::new(14.0, 0.0), egui::Align2::LEFT_CENTER, g, icon_font(13.0), tint.unwrap_or(if sel { pal.accent } else { pal.faint }));
     ui.painter().text(r.left_center() + Vec2::new(38.0, 0.0), egui::Align2::LEFT_CENTER, label, egui::FontId::proportional(14.0), c);
     if let Some(n) = count.filter(|n| *n > 0) {
         ui.painter().text(r.right_center() - Vec2::new(10.0, 0.0), egui::Align2::RIGHT_CENTER, n.to_string(), egui::FontId::proportional(12.0), pal.faint);
@@ -1110,12 +1211,25 @@ enum FolderAct {
     CancelRename,
     Move(usize, usize),
     Delete(String),
+    Colour(String, String),
+    Icon(String, String),
 }
 
 fn group_header(ui: &mut egui::Ui, pal: &Pal, t: &str, n: usize) {
     ui.horizontal(|ui| {
         ui.add_space(8.0);
         ui.label(RichText::new(t.to_uppercase()).size(11.0).color(pal.faint).strong());
+        if n > 0 {
+            ui.label(RichText::new(n.to_string()).size(11.0).color(pal.faint));
+        }
+    });
+}
+
+fn folder_header(ui: &mut egui::Ui, pal: &Pal, g: &str, col: Option<Color32>, t: &str, n: usize) {
+    ui.horizontal(|ui| {
+        ui.add_space(8.0);
+        ui.label(icon(g, 11.0, col.unwrap_or(pal.faint)));
+        ui.label(RichText::new(t.to_uppercase()).size(11.0).color(col.unwrap_or(pal.faint)).strong());
         if n > 0 {
             ui.label(RichText::new(n.to_string()).size(11.0).color(pal.faint));
         }
@@ -1176,6 +1290,7 @@ impl eframe::App for MainApp {
         let ctx = ui.ctx().clone();
         self.frames += 1;
         if self.frames == 2
+            && std::env::var_os("STICKY_NO_FOCUS").is_none()
             && let Some(h) = self.hwnd
         {
             win::force_foreground(h);
@@ -1236,6 +1351,22 @@ impl eframe::App for MainApp {
             Mode::Full => {
                 egui::Panel::top("title").frame(egui::Frame::NONE).show(ui, |ui| self.title_bar(ui));
                 egui::Panel::left("side").frame(egui::Frame::NONE).resizable(false).exact_size(216.0).show(ui, |ui| self.sidebar(ui));
+                let lists = matches!(self.view, View::Open | View::Category(_) | View::Reminders | View::Notes | View::Done);
+                if lists && self.editor.as_ref().is_some_and(|e| self.data.get(e.id).is_some()) {
+                    let r = egui::Panel::right("details")
+                        .frame(egui::Frame::NONE)
+                        .resizable(true)
+                        .default_size(self.settings.detail_width)
+                        .size_range(300.0..=760.0)
+                        .show(ui, |ui| self.detail_pane(ui));
+                    let w = r.response.rect.width().round();
+                    if (w - self.settings.detail_width).abs() > 3.0 && ctx.input(|i| !i.pointer.any_down()) && w >= 300.0 {
+                        self.settings.detail_width = w;
+                        let mut disk = Settings::load();
+                        disk.detail_width = w;
+                        disk.save();
+                    }
+                }
                 egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| self.content(ui));
                 resize_edges(ui);
                 // remember the size
