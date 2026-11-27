@@ -193,9 +193,18 @@ pub fn install_fonts(ctx: &egui::Context) {
         fonts.font_data.insert("icons".into(), Arc::new(FontData::from_owned(b)));
         icons.push("icons".to_string());
     }
+    // Windows' own emoji and symbols, for chat messages: egui's built-in emoji font stops at
+    // about 2018 (no 🥳). egui draws them one colour, like the text.
+    let mut emoji = vec![];
+    for (key, file) in [("emoji", "seguiemj.ttf"), ("symbols", "seguisym.ttf")] {
+        if let Some(b) = load(&[file]) {
+            fonts.font_data.insert(key.into(), Arc::new(FontData::from_owned(b)));
+            emoji.push(key.to_string());
+        }
+    }
     let defaults = fonts.families.get(&FontFamily::Proportional).cloned().unwrap_or_default();
-    let prop: Vec<String> = regular.iter().chain(icons.iter()).chain(defaults.iter()).cloned().collect();
-    let semi_f: Vec<String> = semi.iter().chain(regular.iter()).chain(icons.iter()).chain(defaults.iter()).cloned().collect();
+    let prop: Vec<String> = regular.iter().chain(icons.iter()).chain(emoji.iter()).chain(defaults.iter()).cloned().collect();
+    let semi_f: Vec<String> = semi.iter().chain(regular.iter()).chain(icons.iter()).chain(emoji.iter()).chain(defaults.iter()).cloned().collect();
     let icon_f: Vec<String> = icons.iter().chain(defaults.iter()).cloned().collect();
     fonts.families.insert(FontFamily::Proportional, prop);
     fonts.families.insert(FontFamily::Name("semi".into()), semi_f);
