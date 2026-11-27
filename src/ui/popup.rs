@@ -384,13 +384,28 @@ impl eframe::App for Popup {
                     }
                     close = true;
                 }
-                if self.open.starts_with("beeper:") && ui.add(egui::Button::new("Open in Beeper").min_size(Vec2::new(0.0, 30.0))).on_hover_text("Opens the chat in Beeper and closes this").clicked() {
-                    crate::beeper::open(&self.open);
+                let open = if self.open.starts_with("beeper:") {
+                    Some(("Open in Beeper", "Opens the chat in Beeper and closes this"))
+                } else if self.open.starts_with("rustdesk:") {
+                    Some(("Connect with RustDesk", "Opens RustDesk on this connection and closes this"))
+                } else {
+                    None
+                };
+                if let Some((label, tip)) = open
+                    && ui.add(egui::Button::new(label).min_size(Vec2::new(0.0, 30.0))).on_hover_text(tip).clicked()
+                {
+                    if let Some(id) = self.open.strip_prefix("rustdesk:") {
+                        if !win::rustdesk_connect(id) {
+                            store::log("rustdesk", self.id, "couldn't start RustDesk");
+                        }
+                    } else {
+                        crate::beeper::open(&self.open);
+                    }
                     store::close_alert(self.id);
                     close = true;
                 }
-                // nothing to snooze about someone at the door
-                if self.live.is_empty() {
+                // nothing to snooze about someone at the door, or a PC that's now on
+                if self.live.is_empty() && !self.open.starts_with("rustdesk:") {
                     let sn = self.settings.snooze_minutes;
                     if ui.add(egui::Button::new(format!("{}  Snooze {sn} min", ic::SNOOZE)).min_size(Vec2::new(0.0, 30.0))).clicked() {
                         store::snooze(self.id, sn as i64);

@@ -80,6 +80,11 @@ Windows DPAPI). The background helper keeps a websocket open and turns these int
 
   Keep the webhook address private: anyone who has it can send you alerts.
 
+A line `open: rustdesk:<id>` in the message becomes a **Connect with RustDesk** button on the
+pop-up (it runs `rustdesk.exe --connect <id>`, so a saved password is used) and is left out of
+the text; `open: beeper:<chat id>` gives Open in Beeper. For example, an automation that waits for
+a wake-on-LAN switch's PC to answer after someone turns it on can pop up "PC is on, connect".
+
 Locally, `sticky alert <text> [--detail <text>] [--picture <file>]` pops one up from a script.
 
 An alert isn't a task: **Close** (or ticking it in the list) removes it rather than counting it as

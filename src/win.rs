@@ -498,6 +498,24 @@ pub fn system_light() -> bool {
     }
 }
 
+/// Start RustDesk on a connection (its ID). A saved password for it is used as usual.
+pub fn rustdesk_connect(id: &str) -> bool {
+    let id: String = id.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '@' || *c == '.').collect();
+    if id.is_empty() {
+        return false;
+    }
+    let pf = std::env::var("ProgramFiles").unwrap_or_else(|_| "C:\\Program Files".into());
+    let local = std::env::var("LOCALAPPDATA").unwrap_or_default();
+    let exe = [format!("{pf}\\RustDesk\\rustdesk.exe"), format!("{local}\\Programs\\RustDesk\\rustdesk.exe")]
+        .into_iter()
+        .find(|p| std::path::Path::new(p).exists());
+    match exe {
+        Some(exe) => std::process::Command::new(exe).args(["--connect", &id]).spawn().is_ok(),
+        // the rustdesk:// link RustDesk registers
+        None => std::process::Command::new("rundll32.exe").args(["url.dll,FileProtocolHandler", &format!("rustdesk://{id}")]).spawn().is_ok(),
+    }
+}
+
 pub fn open_path(p: &std::path::Path) {
     let _ = std::process::Command::new("explorer.exe").arg(p).spawn();
 }

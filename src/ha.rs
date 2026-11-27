@@ -239,6 +239,22 @@ fn print_end_in_history(list: &[Value]) -> Option<(String, f64)> {
     end
 }
 
+/// Pull an `open: rustdesk:<id>` (or `beeper:<chat>`) line out of a notification: (text
+/// without it, the link). The pop-up turns it into a Connect / Open button.
+pub fn take_open(md: &str) -> (String, Option<String>) {
+    let mut link = None;
+    let mut keep = vec![];
+    for line in md.lines() {
+        let l = line.trim();
+        let v = l.strip_prefix("open:").or_else(|| l.strip_prefix("Open:")).map(str::trim);
+        match v {
+            Some(v) if link.is_none() && (v.starts_with("rustdesk:") || v.starts_with("beeper:")) => link = Some(v.to_string()),
+            _ => keep.push(line),
+        }
+    }
+    (keep.join("\n").trim().to_string(), link)
+}
+
 fn tidy_file_name(f: &str) -> String {
     let base = f.rsplit(['/', '\\']).next().unwrap_or(f);
     let base = base.strip_suffix(".gcode").or_else(|| base.strip_suffix(".3mf")).unwrap_or(base);
@@ -684,7 +700,8 @@ impl Session<'_> {
                 continue;
             }
             let title = n["title"].as_str().unwrap_or("").trim().to_string();
-            let (message, url) = take_picture(n["message"].as_str().unwrap_or(""));
+            let (message, open) = take_open(n["message"].as_str().unwrap_or(""));
+            let (message, url) = take_picture(&message);
             let (text, detail) = if title.is_empty() {
                 let mut lines = message.lines();
                 (lines.next().unwrap_or("Alert").to_string(), lines.collect::<Vec<_>>().join("\n"))
@@ -698,7 +715,11 @@ impl Session<'_> {
                     None
                 }
             });
-            add_alert(&text, &detail, "Home Assistant", picture);
+            let mut item = new_alert(&text, &detail, "Home Assistant");
+            item.picture = picture;
+            item.open = open.unwrap_or_default();
+            let id = store::update(|d| d.add(item));
+            store::log("alert from home assistant", id, &text);
             let _ = self.send(json!({"type": "call_service", "domain": "persistent_notification", "service": "dismiss", "service_data": {"notification_id": nid}}));
         }
     }
@@ -718,6 +739,14 @@ mod tests {
         assert_eq!(got.map(|g| g.1 as i64), Some(DateTime::parse_from_rfc3339("2026-11-27T03:00:00+11:00").unwrap().timestamp()));
         // still printing: nothing yet
         assert_eq!(print_end_in_history(&h(&[("complete", "2026-11-27T01:00:00+11:00"), ("printing", "2026-11-27T02:00:00+11:00")])), None);
+    }
+
+    #[test]
+    fn open_line() {
+        let (t, l) = take_open("Woken from Home Assistant.\nopen: rustdesk:499722131\n");
+        assert_eq!(t, "Woken from Home Assistant.");
+        assert_eq!(l.as_deref(), Some("rustdesk:499722131"));
+        assert_eq!(take_open("open: https://example.com").1, None);
     }
 
     #[test]
