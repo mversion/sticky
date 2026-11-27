@@ -32,6 +32,8 @@ struct Popup {
     live_rx: Option<std::sync::mpsc::Receiver<(u32, u32, Vec<u8>)>>,
     live_until: Option<std::time::Instant>,
     live_auto: bool,
+    /// Where Open goes ("beeper:<chat id>"); empty hides it
+    open: String,
     /// Set once you drag the pop-up: it leaves the stack and stays where you put it
     dragged: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
@@ -102,6 +104,7 @@ pub fn run(id: u64, _slot: i32, was: i64) {
                 live_until: None,
                 // live straight away only for a fresh alert, not one snoozed or shown late
                 live_auto: !item.live.is_empty() && (Local::now() - item.created).num_minutes() < 10,
+                open: item.open.clone(),
                 dragged,
             }))
         }),
@@ -381,6 +384,11 @@ impl eframe::App for Popup {
                     }
                     close = true;
                 }
+                if self.open.starts_with("beeper:") && ui.add(egui::Button::new("Open in Beeper").min_size(Vec2::new(0.0, 30.0))).on_hover_text("Opens the chat in Beeper and closes this").clicked() {
+                    crate::beeper::open(&self.open);
+                    store::close_alert(self.id);
+                    close = true;
+                }
                 // nothing to snooze about someone at the door
                 if self.live.is_empty() {
                     let sn = self.settings.snooze_minutes;
@@ -388,7 +396,8 @@ impl eframe::App for Popup {
                         store::snooze(self.id, sn as i64);
                         close = true;
                     }
-                    if ui.add(egui::Button::new("…").min_size(Vec2::new(30.0, 30.0))).on_hover_text("More snooze options").clicked() {
+                    // a chat alert's Open in Beeper takes this one's room
+                    if self.open.is_empty() && ui.add(egui::Button::new("…").min_size(Vec2::new(30.0, 30.0))).on_hover_text("More snooze options").clicked() {
                         self.snooze_open = !self.snooze_open;
                     }
                 }

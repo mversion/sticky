@@ -16,6 +16,7 @@
 //!   sticky install [--no-autostart] [--no-kite]   install without the window
 //!   sticky uninstall [--quiet]   remove it (Settings > Apps runs this)
 
+mod beeper;
 mod daemon;
 mod ha;
 mod icon;
@@ -74,6 +75,13 @@ fn main() {
         "log" => daemon::open_ui("log"),
         "daemon" => daemon::run(),
         "alert" => alert(&args[1..]),
+        // for trying things out: run only the chat alerts, in the foreground
+        "beeper-watch" => {
+            beeper::start();
+            loop {
+                std::thread::sleep(std::time::Duration::from_secs(3600));
+            }
+        }
         // for trying things out: run only the Home Assistant connection, in the foreground
         "ha-watch" => {
             ha::start();

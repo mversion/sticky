@@ -161,6 +161,19 @@ pub fn get(url: &Url, path: &str, token: Option<&str>) -> Result<Vec<u8>, String
     }
 }
 
+/// POST a body (`kind` is its Content-Type) and return the reply.
+pub fn post(url: &Url, path: &str, token: Option<&str>, kind: &str, body: &[u8]) -> Result<Vec<u8>, String> {
+    let r = open(url, "POST", path)?;
+    let code = send(&r, &format!("Content-Type: {kind}\r\n{}", auth_header(token)), body)?;
+    let reply = read_all(&r, 4 << 20)?;
+    match code {
+        200..=299 => Ok(reply),
+        401 | 403 => Err("the token was refused".into()),
+        404 => Err("not found".into()),
+        c => Err(format!("HTTP {c}")),
+    }
+}
+
 /// GET any absolute URL, with the token only when it goes to `trusted`.
 pub fn get_any(full: &str, trusted: &Url, token: &str) -> Result<Vec<u8>, String> {
     if full.starts_with('/') {

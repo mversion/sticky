@@ -86,13 +86,26 @@ An alert isn't a task: **Close** (or ticking it in the list) removes it rather t
 done. Pop-ups stack in the corner from Settings, oldest nearest the corner; when one closes the
 others slide along to fill the gap. Drag one away and it stays where you put it.
 
+## Chat alerts through Beeper
+
+Sticky can pop up new messages from chats on any network Beeper Desktop has (Slack, WhatsApp,
+Telegram, Messenger, Instagram, LinkedIn and more), so you don't need each app installed.
+Settings > Chat alerts > **Connect to Beeper** opens Beeper's approval page; approve Sticky there
+(read only; the token is stored encrypted with Windows DPAPI). Then pick the chats under
+**Chats to watch**.
+
+The helper asks Beeper Desktop's local API (`127.0.0.1:23373`) every 5 seconds. Each new message
+from someone else pops up as an alert with **Open in Beeper**; several at once come as one pop-up.
+A chat added later starts from then, and messages that arrived while the PC was off pop up when
+the helper starts. Beeper has to be running on this PC.
+
 ## How it's built
 
 One small exe (about 6 MB) that runs in roles, so nothing heavy stays in memory:
 
 | Role | Memory | Runs |
 |---|---|---|
-| `daemon`: tray, hotkey, reminder clock, update check, Home Assistant connection | about 2 MB private | always (HKCU Run key `Sticky`) |
+| `daemon`: tray, hotkey, reminder clock, update check, Home Assistant connection, chat alerts | about 2 MB private | always (HKCU Run key `Sticky`) |
 | `ui`: quick add and the main window | about 65 MB, mostly the GL driver | while open |
 | `popup`: a reminder | about 65 MB | until you act on it |
 | `note`: the desktop sticky note | about 65 MB | only if turned on |
@@ -123,7 +136,7 @@ cargo build --release
 `STICKY_HOME=<folder>` runs against a test data folder, beside the real copy (it gets its own
 window locks). `tools\grab.ps1 -Title "Sticky" -Out x.png [-ProcessId n]` screenshots a Sticky
 window. `sticky ha-import` copies the desk dashboard's Home Assistant sign-in into the settings,
-`sticky ha-watch` runs only the Home Assistant connection, and `STICKY_FAKE_PRINT_END=1` makes it
+`sticky ha-watch` runs only the Home Assistant connection, `sticky beeper-watch` only the chat alerts, and `STICKY_FAKE_PRINT_END=1` makes it
 send a print alert as soon as it connects. `STICKY_SETTINGS_SEARCH=<words>` pre-fills the settings
 search and `STICKY_EDIT=<id>` opens that item's details pane, and `STICKY_NO_FOCUS=1` opens windows
 without taking keyboard focus (for screenshots), `STICKY_MUTE=1` plays no sounds and

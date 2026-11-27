@@ -61,6 +61,7 @@ pub struct MainApp {
     pub(super) set_search: String,
     pub(super) new_cat: String,
     pub(super) ha: super::settings_view::HaUi,
+    pub(super) beeper: super::settings_view::BeeperUi,
     frames: u32,
     /// Sidebar: the name being typed for a new folder, and a folder being renamed (old, new).
     new_folder: Option<String>,
@@ -131,6 +132,7 @@ pub fn run(mode: &str) {
                 set_search: std::env::var("STICKY_SETTINGS_SEARCH").unwrap_or_default(), // for screenshots
                 new_cat: String::new(),
                 ha: Default::default(),
+                beeper: Default::default(),
                 frames: 0,
                 new_folder: None,
                 renaming: None,

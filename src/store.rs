@@ -132,6 +132,9 @@ pub struct Item {
     /// A Home Assistant camera the pop-up shows live for a few minutes (the doorbell).
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub live: String,
+    /// Where the alert's Open button goes: "beeper:<chat id>" opens that chat in Beeper.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub open: String,
 }
 
 impl Item {

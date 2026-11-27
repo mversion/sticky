@@ -132,6 +132,7 @@ pub fn run() {
     }
     store::log("helper started", 0, "");
     crate::ha::start();
+    crate::beeper::start();
     {
         let keep: Vec<String> = store::load().items.iter().filter(|i| !i.done).filter_map(|i| i.picture.clone()).collect();
         crate::picture::prune(30, &keep);

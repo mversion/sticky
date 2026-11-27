@@ -179,10 +179,21 @@ pub fn add_alert(text: &str, detail: &str, source: &str, picture: Option<String>
 
 /// `add_alert` with its own pop-up sound and a camera to show live.
 pub fn add_alert_with(text: &str, detail: &str, source: &str, picture: Option<String>, sound: &str, live: &str) -> u64 {
+    let mut item = new_alert(text, detail, source);
+    item.picture = picture;
+    item.sound = sound.to_string();
+    item.live = live.to_string();
+    let id = store::update(|d| d.add(item));
+    store::log(&format!("alert from {}", source.to_lowercase()), id, text);
+    id
+}
+
+/// An alert item that pops up now, not yet added (for alerts that need more set on it).
+pub fn new_alert(text: &str, detail: &str, source: &str) -> Item {
     let s = Settings::load();
     let now = Local::now();
     let category = if s.smart_category && s.categories.iter().any(|c| c == "Today") { "Today".to_string() } else { s.default_category.clone() };
-    let item = Item {
+    Item {
         id: 0,
         text: text.trim().to_string(),
         kind: Kind::Task,
@@ -204,13 +215,11 @@ pub fn add_alert_with(text: &str, detail: &str, source: &str, picture: Option<St
         notes: String::new(),
         detail: detail.trim().to_string(),
         source: source.to_string(),
-        picture,
-        sound: sound.to_string(),
-        live: live.to_string(),
-    };
-    let id = store::update(|d| d.add(item));
-    store::log(&format!("alert from {}", source.to_lowercase()), id, text);
-    id
+        picture: None,
+        sound: String::new(),
+        live: String::new(),
+        open: String::new(),
+    }
 }
 
 /// From a state history (oldest first): the last change from printing or paused to an end state.

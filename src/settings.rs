@@ -71,6 +71,24 @@ pub struct Settings {
     pub ha_doorbell_sensor: String,
     /// Camera for the footage; empty picks the doorbell's own, "none" for no picture
     pub ha_doorbell_camera: String,
+    // Chat alerts (Beeper Desktop)
+    /// DPAPI-encrypted Beeper Desktop API token (see secret.rs)
+    pub beeper_token: String,
+    pub beeper_alerts: bool,
+    /// Chats whose new messages pop up
+    pub beeper_chats: Vec<WatchedChat>,
+}
+
+/// A Beeper chat being watched for new messages.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
+#[serde(default)]
+pub struct WatchedChat {
+    /// Beeper's chat ID, e.g. "!wye92hH5xB7AcZtCX8qX:beeper.local"
+    pub id: String,
+    /// "#radio-parts", "Petra Manos"
+    pub name: String,
+    /// "Slack", "WhatsApp": the pop-up's heading
+    pub network: String,
 }
 
 /// A folder's look. Empty strings mean the default (grey folder icon).
@@ -133,6 +151,9 @@ impl Default for Settings {
             ha_doorbell: true,
             ha_doorbell_sensor: String::new(),
             ha_doorbell_camera: String::new(),
+            beeper_token: String::new(),
+            beeper_alerts: true,
+            beeper_chats: vec![],
         }
     }
 }
@@ -173,7 +194,7 @@ pub struct Meta {
     pub keywords: &'static str,
 }
 
-pub const SECTIONS: [&str; 8] = ["General", "Appearance", "Tasks", "Reminders", "Home Assistant", "Sticky note", "Updates", "Data"];
+pub const SECTIONS: [&str; 9] = ["General", "Appearance", "Tasks", "Reminders", "Home Assistant", "Chat alerts", "Sticky note", "Updates", "Data"];
 
 pub const META: &[Meta] = &[
     Meta { key: "hotkey", section: "General", label: "Quick-add hotkey", help: "Opens the quick-add box from anywhere. Example: Ctrl+Alt+N, Win+Shift+Space.", keywords: "shortcut keyboard key global launch open" },
@@ -209,6 +230,9 @@ pub const META: &[Meta] = &[
     Meta { key: "ha_doorbell_sensor", section: "Home Assistant", label: "Doorbell button", help: "The doorbell's visitor sensor in Home Assistant.", keywords: "doorbell visitor button press reolink" },
     Meta { key: "ha_doorbell_camera", section: "Home Assistant", label: "Footage from", help: "The camera the doorbell pop-up shows live.", keywords: "doorbell camera live footage video picture" },
     Meta { key: "ha_notifications", section: "Home Assistant", label: "Alerts from automations and webhooks", help: "A Home Assistant notification whose ID starts with \"sticky\" pops up here and is then cleared. A picture in it, ![](address), comes too. Copy webhook setup copies a ready-made automation.", keywords: "webhook automation notification relay external services ifttt api url persistent" },
+    Meta { key: "beeper", section: "Chat alerts", label: "Connect to Beeper", help: "New messages in chats you pick pop up here, from any network Beeper Desktop has: Slack, WhatsApp, Telegram, Messenger and more. Beeper must be running on this PC. Sticky only reads; the token is kept encrypted for this Windows account.", keywords: "beeper slack whatsapp telegram messenger instagram linkedin chat message channel dm notification" },
+    Meta { key: "beeper_alerts", section: "Chat alerts", label: "Pop up new messages", help: "Off pauses chat alerts without forgetting the chats.", keywords: "beeper slack chat message alert pause mute" },
+    Meta { key: "beeper_chats", section: "Chat alerts", label: "Chats to watch", help: "Each new message from someone else pops up, with Open in Beeper. Several at once come as one pop-up.", keywords: "beeper slack channel chat group dm watch pick" },
     Meta { key: "note_window", section: "Sticky note", label: "Show the sticky note on the desktop", help: "A small always-there note with your open and done items. The desk dashboard has its own Sticky tile too.", keywords: "pin desktop widget permanent window dashboard" },
     Meta { key: "note_on_top", section: "Sticky note", label: "Keep the sticky note on top", help: "Stays above other windows.", keywords: "always top float pin" },
     Meta { key: "note_show_done", section: "Sticky note", label: "Show done items on the note", help: "Lists items finished today, crossed out.", keywords: "completed finished" },

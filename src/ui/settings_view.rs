@@ -55,7 +55,7 @@ pub fn show(app: &mut MainApp, ui: &mut egui::Ui) {
                         let r = ui.available_rect_before_wrap();
                         ui.painter().hline(r.x_range().shrink(10.0), r.top(), Stroke::new(1.0, pal.border.gamma_multiply(0.6)));
                     }
-                    row(ui, &pal, m, &mut s, &mut app.new_cat, &mut app.ha);
+                    row(ui, &pal, m, &mut s, &mut app.new_cat, &mut app.ha, &mut app.beeper);
                 }
             });
             ui.add_space(8.0);
@@ -97,10 +97,10 @@ pub fn show(app: &mut MainApp, ui: &mut egui::Ui) {
     }
 }
 
-fn row(ui: &mut egui::Ui, pal: &Pal, m: &crate::settings::Meta, s: &mut Settings, new_cat: &mut String, ha: &mut HaUi) {
+fn row(ui: &mut egui::Ui, pal: &Pal, m: &crate::settings::Meta, s: &mut Settings, new_cat: &mut String, ha: &mut HaUi, beeper: &mut BeeperUi) {
     egui::Frame::new().inner_margin(Margin::symmetric(12, 10)).show(ui, |ui| {
         ui.set_width(ui.available_width());
-        let wide = matches!(m.key, "categories" | "ha");
+        let wide = matches!(m.key, "categories" | "ha" | "beeper" | "beeper_chats");
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
                 ui.set_max_width((ui.available_width() - 300.0).max(220.0));
@@ -111,6 +111,8 @@ fn row(ui: &mut egui::Ui, pal: &Pal, m: &crate::settings::Meta, s: &mut Settings
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     if m.key.starts_with("ha_") {
                         ha_control(ui, pal, m.key, s, ha)
+                    } else if m.key == "beeper_alerts" {
+                        toggle(ui, pal, &mut s.beeper_alerts)
                     } else {
                         control(ui, pal, m.key, s)
                     }
@@ -121,6 +123,10 @@ fn row(ui: &mut egui::Ui, pal: &Pal, m: &crate::settings::Meta, s: &mut Settings
             ui.add_space(6.0);
             if m.key == "ha" {
                 ha_connect(ui, pal, s, ha);
+            } else if m.key == "beeper" {
+                beeper_connect(ui, pal, s, beeper);
+            } else if m.key == "beeper_chats" {
+                beeper_chats(ui, pal, s, beeper);
             } else {
                 categories(ui, pal, s, new_cat);
             }
@@ -548,6 +554,140 @@ fn ha_control(ui: &mut egui::Ui, pal: &Pal, key: &str, s: &mut Settings, ha: &mu
             });
         }
         _ => {}
+    }
+}
+
+// ---------------------------------------------------------------- Chat alerts (Beeper)
+
+type Shared<T> = std::sync::Arc<std::sync::Mutex<Option<T>>>;
+
+/// Settings-page state for the chat alert rows.
+#[derive(Default)]
+pub struct BeeperUi {
+    /// The answer from Connect to Beeper (runs in the background)
+    connecting: Shared<Result<String, String>>,
+    busy: bool,
+    /// Beeper's chats, fetched in the background once per token
+    chats: Shared<Result<Vec<crate::settings::WatchedChat>, String>>,
+    looked: String,
+    status: crate::beeper::Status,
+    status_at: Option<std::time::Instant>,
+    msg: String,
+    filter: String,
+}
+
+fn beeper_connect(ui: &mut egui::Ui, pal: &Pal, s: &mut Settings, b: &mut BeeperUi) {
+    if b.status_at.is_none_or(|t| t.elapsed().as_secs() >= 1) {
+        b.status = crate::beeper::load_status();
+        b.status_at = Some(std::time::Instant::now());
+    }
+    ui.ctx().request_repaint_after(std::time::Duration::from_secs(1));
+    if let Some(r) = b.connecting.lock().ok().and_then(|mut x| x.take()) {
+        b.busy = false;
+        match r {
+            Ok(token) => {
+                s.beeper_token = crate::secret::seal(&token);
+                b.looked.clear();
+                b.msg = "Connected. Pick the chats to watch below.".into();
+            }
+            Err(e) => b.msg = e,
+        }
+    }
+    let saved = crate::secret::open(&s.beeper_token).is_some();
+    ui.horizontal(|ui| {
+        let label = if b.busy { "Waiting for Beeper…" } else if saved { "Connect again" } else { "Connect to Beeper" };
+        let tip = "Opens Beeper's approval page in your browser. Approve Sticky there (read only).";
+        if ui.add_enabled(!b.busy, egui::Button::new(label)).on_hover_text(tip).clicked() {
+            b.busy = true;
+            b.msg = "Approve Sticky on the page that just opened in your browser.".into();
+            let slot = b.connecting.clone();
+            let ctx = ui.ctx().clone();
+            std::thread::spawn(move || {
+                let r = crate::beeper::connect();
+                *slot.lock().unwrap() = Some(r);
+                ctx.request_repaint();
+            });
+        }
+        if saved && !b.busy && ui.button("Disconnect").on_hover_text("Forgets the token").clicked() {
+            s.beeper_token.clear();
+            b.looked.clear();
+            b.msg.clear();
+        }
+    });
+    ui.add_space(4.0);
+    let st = &b.status;
+    let (col, word) = match st.state.as_str() {
+        "connected" => (pal.green, "Connected"),
+        "error" => (pal.red, "Can't connect"),
+        _ => (pal.faint, "Off"),
+    };
+    ui.horizontal_wrapped(|ui| {
+        ui.label(RichText::new("●").color(col));
+        let detail = if st.detail.is_empty() { if saved { "Starting" } else { "Not connected" } } else { st.detail.as_str() };
+        ui.label(RichText::new(format!("{word}: {detail}")).size(12.0).color(pal.dim));
+    });
+    if !b.msg.is_empty() {
+        ui.add(egui::Label::new(RichText::new(&b.msg).size(12.0).color(pal.dim)).wrap());
+    }
+}
+
+fn beeper_chats(ui: &mut egui::Ui, pal: &Pal, s: &mut Settings, b: &mut BeeperUi) {
+    let mut remove = None;
+    for (n, c) in s.beeper_chats.iter().enumerate() {
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(&c.name).color(pal.text));
+            if !c.network.is_empty() {
+                ui.label(RichText::new(&c.network).size(12.0).color(pal.faint));
+            }
+            if ui.add(egui::Button::new(icon(ic::CLOSE, 10.0, pal.dim)).frame(false)).on_hover_text("Stop watching").clicked() {
+                remove = Some(n);
+            }
+        });
+    }
+    if let Some(n) = remove {
+        s.beeper_chats.remove(n);
+    }
+    let Some(token) = crate::secret::open(&s.beeper_token) else {
+        ui.label(RichText::new("Connect to Beeper first.").size(12.0).color(pal.faint));
+        return;
+    };
+    if b.looked != s.beeper_token {
+        b.looked = s.beeper_token.clone();
+        *b.chats.lock().unwrap() = None;
+        let slot = b.chats.clone();
+        let ctx = ui.ctx().clone();
+        std::thread::spawn(move || {
+            let r = crate::beeper::chats(&token);
+            *slot.lock().unwrap() = Some(r);
+            ctx.request_repaint();
+        });
+    }
+    let found = b.chats.lock().ok().and_then(|x| x.clone());
+    match found {
+        None => {
+            ui.label(RichText::new("Getting your chats from Beeper…").size(12.0).color(pal.faint));
+        }
+        Some(Err(e)) => {
+            ui.label(RichText::new(e).size(12.0).color(pal.red));
+        }
+        Some(Ok(list)) => {
+            ui.horizontal(|ui| {
+                ui.add(egui::TextEdit::singleline(&mut b.filter).hint_text("Find a chat: slack, radio…").desired_width(200.0));
+                let words: Vec<String> = b.filter.to_lowercase().split_whitespace().map(String::from).collect();
+                let mut pick = None;
+                egui::ComboBox::from_id_salt("beeper_add").selected_text("Add a chat").width(260.0).height(360.0).show_ui(ui, |ui| {
+                    for c in list.iter().filter(|c| !s.beeper_chats.iter().any(|w| w.id == c.id)) {
+                        let hay = format!("{} {}", c.name, c.network).to_lowercase();
+                        if words.iter().all(|w| hay.contains(w.as_str())) && ui.selectable_label(false, format!("{}  ·  {}", c.name, c.network)).clicked() {
+                            pick = Some(c.clone());
+                        }
+                    }
+                });
+                if let Some(c) = pick {
+                    s.beeper_chats.push(c);
+                }
+            });
+        }
     }
 }
 
